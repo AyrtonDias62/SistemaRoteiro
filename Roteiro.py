@@ -6,15 +6,17 @@ from openrouteservice import client
 import folium
 from streamlit_folium import st_folium
 from datetime import datetime
+import math
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Logístico V7", layout="wide")
+st.set_page_config(page_title="Roteirizador Logístico V7.1", layout="wide")
 
 try:
     api_key = st.secrets["ORS_KEY"]
     ors_client = client.Client(key=api_key)
 except Exception as e:
     st.error("Erro: Configure a ORS_KEY nas Secrets.")
+    st.stop()
 
 # --- UNIDADES ---
 unidades = [
@@ -32,9 +34,12 @@ unidades = [
     {"nome": "U14", "lat": -23.66884, "lon": -46.45567},
 ]
 
-# --- FUNÇÕES AUXILIARES ---
+# --- MEMÓRIA DO APP (SESSION STATE) ---
+if "resultado_rota" not in st.session_state:
+    st.session_state.resultado_rota = None
+
+# --- FUNÇÕES ---
 def get_coords_cep(cep):
-    """Busca coordenadas via ViaCEP + ORS Geocoding"""
     r = requests.get(f"https://viacep.com.br/ws/{cep.replace('-','')}/json/").json()
     if "erro" in r: return None
     logra, cidade = r.get('logradouro', ''), r.get('localidade', '')
@@ -44,95 +49,85 @@ def get_coords_cep(cep):
         return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {r.get('bairro')}"}
     return None
 
-def dist_reta(lat1, lon1, lat2, lon2):
-    return math.sqrt((lat1-lat2)**2 + (lon1-lon2)**2) # Simples para ordenação
-
 # --- INTERFACE ---
 st.title("🚚 Planejador de Roteiros Multi-Paradas")
 
 with st.sidebar:
     st.header("Entrada de Dados")
-    st.write("Insira até 5 CEPs para o roteiro:")
     ceps_input = []
     for i in range(5):
-        c = st.text_input(f"CEP Destino {i+1}:", key=f"cep_{i}")
+        c = st.text_input(f"CEP Destino {i+1}:", key=f"input_cep_{i}")
         if c: ceps_input.append(c)
     
-    btn_gerar = st.button("Gerar Melhor Rota", use_container_width=True)
+    if st.button("Gerar Melhor Rota", use_container_width=True):
+        if ceps_input:
+            with st.spinner("Processando roteiro..."):
+                lista_destinos = []
+                for c in ceps_input:
+                    info = get_coords_cep(c)
+                    if info: lista_destinos.append(info)
+                
+                if lista_destinos:
+                    # Seleção da Unidade Base (mais próxima do 1º CEP)
+                    primeiro = lista_destinos[0]
+                    unidade_base = min(unidades, key=lambda u: (u['lat']-primeiro['lat'])**2 + (u['lon']-primeiro['lon'])**2)
+                    
+                    coords_rota = [[unidade_base['lon'], unidade_base['lat']]]
+                    for d in lista_destinos:
+                        coords_rota.append([d['lon'], d['lat']])
+                    coords_rota.append([unidade_base['lon'], unidade_base['lat']])
 
-if btn_gerar and ceps_input:
-    lista_destinos = []
-    with st.spinner("Localizando endereços..."):
-        for c in ceps_input:
-            info = get_coords_cep(c)
-            if info: lista_destinos.append(info)
+                    rota_res = ors_client.directions(
+                        coordinates=coords_rota,
+                        profile='driving-car',
+                        format='geojson',
+                        optimize_waypoints=True
+                    )
+                    
+                    # Salva TUDO na memória para não sumir
+                    st.session_state.resultado_rota = {
+                        "unidade": unidade_base,
+                        "destinos": lista_destinos,
+                        "distancia": round(rota_res['features'][0]['properties']['summary']['distance'] / 1000, 2),
+                        "tempo": round(rota_res['features'][0]['properties']['summary']['duration'] / 60, 0),
+                        "caminho": [[p[1], p[0]] for p in rota_res['features'][0]['geometry']['coordinates']]
+                    }
+                else:
+                    st.error("Nenhum CEP válido foi encontrado.")
+        else:
+            st.warning("Insira pelo menos um CEP.")
+
+# --- EXIBIÇÃO (SÓ APARECE SE HOUVER RESULTADO NA MEMÓRIA) ---
+if st.session_state.resultado_rota:
+    res = st.session_state.resultado_rota
+    col1, col2 = st.columns([1, 2])
     
-    if lista_destinos:
-        # 1. Encontrar a unidade mais próxima do primeiro destino para ser a base
-        primeiro = lista_destinos[0]
-        unidade_base = min(unidades, key=lambda u: (u['lat']-primeiro['lat'])**2 + (u['lon']-primeiro['lon'])**2)
+    with col1:
+        st.success(f"**Unidade de Partida:** {res['unidade']['nome']}")
+        st.metric("Distância Total", f"{res['distancia']} km")
+        st.metric("Tempo Estimado", f"{int(res['tempo'])} min")
         
-        # 2. Montar lista de coordenadas para o ORS (Início -> Paradas -> Fim)
-        # Formato ORS: [[lon, lat], [lon, lat]...]
-        coords_rota = [[unidade_base['lon'], unidade_base['lat']]]
-        for d in lista_destinos:
-            coords_rota.append([d['lon'], d['lat']])
-        coords_rota.append([unidade_base['lon'], unidade_base['lat']]) # Volta para base
+        st.write("📍 **Sequência:**")
+        st.caption(f"1. 🏠 Saída: {res['unidade']['nome']}")
+        for i, d in enumerate(res['destinos']):
+            st.caption(f"{i+2}. 📦 {d['endereco']}")
+        st.caption(f"{len(res['destinos'])+2}. 🏁 Retorno: {res['unidade']['nome']}")
 
-        try:
-            with st.spinner("Otimizando trajeto..."):
-                # Chamada de Directions com múltiplas coordenadas
-                rota_res = ors_client.directions(
-                    coordinates=coords_rota,
-                    profile='driving-car',
-                    format='geojson',
-                    optimize_waypoints=True # O ORS tenta organizar a melhor ordem
-                )
-                
-                dist_total = round(rota_res['features'][0]['properties']['summary']['distance'] / 1000, 2)
-                tempo_total = round(rota_res['features'][0]['properties']['summary']['duration'] / 60, 0)
-                caminho_geom = [[p[1], p[0]] for p in rota_res['features'][0]['geometry']['coordinates']]
-
-            # --- EXIBIÇÃO ---
-            col1, col2 = st.columns([1, 2])
-            
-            with col1:
-                st.success(f"**Unidade de Partida:** {unidade_base['nome']}")
-                st.metric("Distância Total do Roteiro", f"{dist_total} km")
-                st.metric("Tempo Estimado (sem paradas)", f"{int(tempo_total)} min")
-                
-                st.write("📍 **Sequência do Percurso:**")
-                st.write(f"1. 🏠 Saída: {unidade_base['nome']}")
-                for i, d in enumerate(lista_destinos):
-                    st.write(f"{i+2}. 📦 {d['endereco']}")
-                st.write(f"{len(lista_destinos)+2}. 🏁 Retorno: {unidade_base['nome']}")
-
-                if st.button("🎈 Finalizar e Salvar Roteiro"):
-                    st.balloons()
-            
-            with col2:
-                m = folium.Map(location=[unidade_base['lat'], unidade_base['lon']], zoom_start=12)
-                
-                # Marcador da Base
-                folium.Marker([unidade_base['lat'], unidade_base['lon']], 
-                              icon=folium.Icon(color='green', icon='home'), 
-                              tooltip="BASE DE PARTIDA/RETORNO").add_to(m)
-                
-                # Marcadores dos Destinos
-                for i, d in enumerate(lista_destinos):
-                    folium.Marker([d['lat'], d['lon']], 
-                                  icon=folium.Icon(color='blue', icon='shopping-cart'),
-                                  popup=d['endereco'],
-                                  tooltip=f"Parada {i+1}").add_to(m)
-                
-                # Linha da Rota Completa
-                folium.PolyLine(caminho_geom, color="red", weight=4, opacity=0.7).add_to(m)
-                
-                st_folium(m, use_container_width=True, height=600)
-
-        except Exception as e:
-            st.error(f"Erro ao calcular rota: {e}")
-    else:
-        st.error("Nenhum CEP válido encontrado.")
+        if st.button("🗑️ Limpar Roteiro"):
+            st.session_state.resultado_rota = None
+            st.rerun()
+    
+    with col2:
+        m = folium.Map(location=[res['unidade']['lat'], res['unidade']['lon']], zoom_start=12)
+        folium.Marker([res['unidade']['lat'], res['unidade']['lon']], 
+                      icon=folium.Icon(color='green', icon='home')).add_to(m)
+        
+        for i, d in enumerate(res['destinos']):
+            folium.Marker([d['lat'], d['lon']], 
+                          icon=folium.Icon(color='blue', icon='shopping-cart'),
+                          tooltip=f"Parada {i+1}: {d['endereco']}").add_to(m)
+        
+        folium.PolyLine(res['caminho'], color="red", weight=4, opacity=0.7).add_to(m)
+        st_folium(m, use_container_width=True, height=600, key="mapa_roteiro")
 else:
-    st.info("Aguardando inserção de CEPs na barra lateral para calcular o roteiro.")
+    st.info("Digite os CEPs na lateral e clique em 'Gerar Melhor Rota'.")
