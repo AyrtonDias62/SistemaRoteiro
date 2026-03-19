@@ -13,29 +13,30 @@ import io
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Roteirizador Tecnolab3",
+    page_title="Roteirizador Tecnolab",
     layout="wide",
     page_icon="🚚"
 )
 
-# --- CSS PARA COMPACTAÇÃO DE ESPAÇOS ---
+# --- CSS REVISADO (EQUILÍBRIO ENTRE ESPAÇO E VISIBILIDADE) ---
 st.markdown("""
     <style>
-    /* Remove o espaço do topo da página */
+    /* Ajuste fino do topo para não cortar o título */
     .block-container {
-        padding-top: 1rem;
+        padding-top: 2rem; 
         padding-bottom: 0rem;
+        padding-left: 3rem;
+        padding-right: 3rem;
     }
-    /* Diminui o espaço entre o título e os widgets */
-    .stMarkdown {
-        margin-bottom: -10px;
-    }
-    /* Compacta as métricas (Base, KM, Tempo) */
+    /* Estilização das métricas para ficarem horizontais e limpas */
     [data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 10px;
-        border-radius: 5px;
-        margin-top: -15px;
+        background-color: #f0f2f6;
+        padding: 5px 15px;
+        border-radius: 10px;
+    }
+    /* Reduz espaço entre elementos do Streamlit */
+    .element-container {
+        margin-bottom: 0.5rem;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -59,31 +60,30 @@ def calcular_distancia_reta(lat1, lon1, lat2, lon2):
     return round(R * (2 * math.atan2(math.sqrt(a), math.sqrt(1-a))), 2)
 
 def get_coords_cep(cep, client_ors):
-    r = requests.get(f"https://viacep.com.br/ws/{cep.replace('-','')}/json/").json()
-    if "erro" in r: return None
-    logra, bairro, cidade = r.get('logradouro', 'N/A'), r.get('bairro', 'N/A'), r.get('localidade', 'N/A')
-    geo = client_ors.pelias_search(text=f"{logra}, {cidade}, SP, Brasil", size=1, focus_point=[-46.55, -23.69])
-    if geo and len(geo['features']) > 0:
-        c = geo['features'][0]['geometry']['coordinates']
-        lat, lon = c[1], c[0]
-    else:
-        geo_cep = client_ors.pelias_search(text=f"{cep}, Brasil", size=1)
-        c = geo_cep['features'][0]['geometry']['coordinates']
-        lat, lon = c[1], c[0]
-    if calcular_distancia_reta(lat, lon, -23.6912, -46.5594) > 150:
-        geo_fix = client_ors.pelias_search(text=f"{cep}, Brasil", size=1)
-        c = geo_fix['features'][0]['geometry']['coordinates']
-        lat, lon = c[1], c[0]
-    return {"lat": lat, "lon": lon, "endereco": f"{logra}, {bairro}"}
+    try:
+        r = requests.get(f"https://viacep.com.br/ws/{cep.replace('-','')}/json/").json()
+        if "erro" in r: return None
+        logra, bairro, cidade = r.get('logradouro', 'N/A'), r.get('bairro', 'N/A'), r.get('localidade', 'N/A')
+        geo = client_ors.pelias_search(text=f"{logra}, {cidade}, SP, Brasil", size=1, focus_point=[-46.55, -23.69])
+        if geo and len(geo['features']) > 0:
+            c = geo['features'][0]['geometry']['coordinates']
+            lat, lon = c[1], c[0]
+        else:
+            geo_cep = client_ors.pelias_search(text=f"{cep}, Brasil", size=1)
+            c = geo_cep['features'][0]['geometry']['coordinates']
+            lat, lon = c[1], c[0]
+        return {"lat": lat, "lon": lon, "endereco": f"{logra}, {bairro}"}
+    except:
+        return None
 
 # --- 3. ASSETS E API ---
-img_b64 = get_image_base64("furgao_tecnolab3.png")
+img_b64 = get_image_base64("furgao_tecnolab.png")
 
 try:
     api_key = st.secrets["ORS_KEY"]
     ors_client = client.Client(key=api_key)
-except Exception as e:
-    st.error("Erro: Configure a ORS_KEY nas Secrets.")
+except:
+    st.error("Erro: Verifique a ORS_KEY.")
     st.stop()
 
 unidades = [
@@ -97,34 +97,35 @@ unidades = [
 if "resultado_rota" not in st.session_state:
     st.session_state.resultado_rota = None
 
-# --- 4. TÍTULO ULTRA COMPACTO ---
+# --- 4. TÍTULO (VOLTANDO AO TAMANHO VISÍVEL) ---
 if img_b64:
     st.markdown(
         f"""
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
-            <img src="{img_b64}" height="32">
-            <h3 style="color: #2E86C1; margin: 0; font-weight: bold;">Roteirizador Tecnolab3</h3>
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+            <img src="{img_b64}" height="45">
+            <h2 style="color: #2E86C1; margin: 0; font-family: sans-serif;">Roteirizador Tecnolab</h2>
         </div>
         """, unsafe_allow_html=True
     )
 else:
-    st.subheader("Roteirizador Tecnolab3")
+    st.title("Roteirizador Tecnolab")
 
 # --- 5. BARRA LATERAL ---
 with st.sidebar:
     st.header("📍 Itinerário")
     ceps_input = []
     for i in range(5):
-        c = st.text_input(f"CEP Parada {i+1}:", key=f"cep_v76_{i}")
+        c = st.text_input(f"CEP {i+1}:", key=f"v77_cep_{i}")
         if c: ceps_input.append(c)
-    btn_calc = st.button("Calcular Rota Otimizada", use_container_width=True)
+    btn_calc = st.button("Gerar Rota Otimizada", use_container_width=True)
 
 if btn_calc and ceps_input:
-    with st.spinner("Otimizando..."):
+    with st.spinner("Processando..."):
         destinos = []
         for cp in ceps_input:
             info = get_coords_cep(cp, ors_client)
             if info: destinos.append(info)
+        
         if destinos:
             u_base = min(unidades, key=lambda u: calcular_distancia_reta(u['lat'], u['lon'], destinos[0]['lat'], destinos[0]['lon']))
             coords = [[u_base['lon'], u_base['lat']]]
@@ -133,17 +134,20 @@ if btn_calc and ceps_input:
                 coords.append([d['lon'], d['lat']])
                 labels.append(d['endereco'])
             coords.append([u_base['lon'], u_base['lat']])
-            labels.append(f"Retorno {u_base['nome']}")
+            labels.append(f"Fim: {u_base['nome']}")
+
             res_api = ors_client.directions(coordinates=coords, profile='driving-car', format='geojson', optimize_waypoints=True)
+            
             segs = res_api['features'][0]['properties']['segments']
             tabela = []
             for idx, s in enumerate(segs):
                 tabela.append({
                     "Origem": labels[idx].replace(", São Bernardo do Campo", ""),
                     "Destino": labels[idx+1].replace(", São Bernardo do Campo", ""),
-                    "Distância (km)": round(s['distance'] / 1000, 2),
+                    "KM": round(s['distance'] / 1000, 2),
                     "Tempo": f"{round(s['duration'] / 60, 1)} min"
                 })
+
             st.session_state.resultado_rota = {
                 "unidade": u_base, "paradas": destinos,
                 "km_total": round(res_api['features'][0]['properties']['summary']['distance'] / 1000, 2),
@@ -152,33 +156,35 @@ if btn_calc and ceps_input:
                 "tabela": tabela
             }
 
-# --- 6. EXIBIÇÃO DOS RESULTADOS (LAYOUT SUBIDO) ---
+# --- 6. EXIBIÇÃO DOS RESULTADOS ---
 if st.session_state.resultado_rota:
     r = st.session_state.resultado_rota
     
-    # Métricas Compactas
+    # Resumo em colunas
     c1, c2, c3 = st.columns(3)
-    c1.metric("Base", r['unidade']['nome'])
-    c2.metric("Total Distância", f"{r['km_total']} km")
-    c3.metric("Tempo Total", f"{int(r['tempo_total'])} min")
+    c1.metric("Unidade Base", r['unidade']['nome'])
+    c2.metric("Distância Total", f"{r['km_total']} km")
+    c3.metric("Tempo Previsto", f"{int(r['tempo_total'])} min")
+
+    st.write("") # Pequeno respiro
 
     col_t, col_m = st.columns([1, 1.2])
 
     with col_t:
-        st.write("📋 **Detalhamento de Trechos**")
-        st.dataframe(pd.DataFrame(r['tabela']), use_container_width=True, hide_index=True, height=250)
+        st.markdown("##### 📋 Trechos Detalhados")
+        st.dataframe(pd.DataFrame(r['tabela']), use_container_width=True, hide_index=True, height=300)
         
-        if st.button("🗑️ Nova Rota", use_container_width=True):
+        if st.button("🗑️ Limpar Mapa", use_container_width=True):
             st.session_state.resultado_rota = None
             st.rerun()
 
     with col_m:
-        st.write("🗺️ **Visualização do Mapa**")
+        st.markdown("##### 🗺️ Mapa da Frota")
         m = folium.Map(location=[r['unidade']['lat'], r['unidade']['lon']], zoom_start=12)
         folium.Marker([r['unidade']['lat'], r['unidade']['lon']], icon=folium.Icon(color='green', icon='home')).add_to(m)
         for i, d in enumerate(r['paradas']):
-            folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Parada {i+1}").add_to(m)
-        folium.PolyLine(r['geo'], color="#2E86C1", weight=5, opacity=0.8).add_to(m)
-        st_folium(m, use_container_width=True, height=450, key="mapa_final_v76")
+            folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Ponto {i+1}").add_to(m)
+        folium.PolyLine(r['geo'], color="#2E86C1", weight=6, opacity=0.8).add_to(m)
+        st_folium(m, use_container_width=True, height=500, key="mapa_v77")
 else:
-    st.info("💡 Insira os CEPs na lateral para gerar o roteiro Tecnolab3.")
+    st.info("Insira os destinos na barra lateral para começar.")
