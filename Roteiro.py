@@ -11,7 +11,7 @@ import io
 from datetime import datetime
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Roteirizador Tecnolab V9.2", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V9.3", layout="wide", page_icon="🚚")
 
 # --- CSS ADAPTÁVEL ---
 st.markdown("""
@@ -42,11 +42,16 @@ def get_coords_cep(cep, _client_ors):
     try:
         r = requests.get(f"https://viacep.com.br/ws/{cep.replace('-','')}/json/").json()
         if "erro" in r: return None
-        logra, cidade = r.get('logradouro', 'N/A'), r.get('localidade', 'N/A')
+        logra, bairro, cidade = r.get('logradouro', 'N/A'), r.get('bairro', 'N/A'), r.get('localidade', 'N/A')
         geo = _client_ors.pelias_search(text=f"{logra}, {cidade}, SP, Brasil", size=1, focus_point=[-46.55, -23.69])
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
-            return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {r.get('bairro','')}"}
+            return {
+                "lat": c[1], 
+                "lon": c[0], 
+                "endereco": f"{logra}, {bairro}",
+                "cep": cep
+            }
         return None
     except: return None
 
@@ -81,8 +86,8 @@ unidades = [
     {"nome": "Tecno U13", "lat": -23.68791, "lon": -46.62192},
 ]
 
-if "resultado_v9" not in st.session_state:
-    st.session_state.resultado_v9 = None
+if "resultado_v93" not in st.session_state:
+    st.session_state.resultado_v93 = None
 
 # --- 4. CABEÇALHO ---
 st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; border-bottom: 2px solid #2E86C1; padding-bottom: 10px;">
@@ -97,7 +102,7 @@ with st.sidebar:
     
     ceps_input = []
     for i in range(5):
-        val = st.text_input(f"CEP Parada {i+1}:", key=f"cep_v92_{i}")
+        val = st.text_input(f"CEP Parada {i+1}:", key=f"cep_v93_{i}")
         if val: ceps_input.append(val)
     
     btn = st.button("🚀 Gerar Itinerário", use_container_width=True)
@@ -146,7 +151,7 @@ if btn and ceps_input:
                         "Tempo": f"{round(s['duration']/60, 1)} min"
                     })
 
-                st.session_state.resultado_v9 = {
+                st.session_state.resultado_v93 = {
                     "unidade": u_base,
                     "km": round(res['features'][0]['properties']['summary']['distance']/1000, 2),
                     "min": int(res['features'][0]['properties']['summary']['duration']/60),
@@ -160,8 +165,8 @@ if btn and ceps_input:
                 st.error(f"Erro na Rota: {e}")
 
 # --- 7. DISPLAY ---
-if st.session_state.resultado_v9:
-    r = st.session_state.resultado_v9
+if st.session_state.resultado_v93:
+    r = st.session_state.resultado_v93
     
     m1, m2, m3 = st.columns(3)
     m1.metric("Base de Origem", r['unidade']['nome'])
@@ -174,18 +179,30 @@ if st.session_state.resultado_v9:
         df_rota = pd.DataFrame(r['tabela'])
         st.dataframe(df_rota, use_container_width=True, hide_index=True)
         
-        # BOTÃO DE DOWNLOAD CSV
         csv = df_rota.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📥 Baixar Itinerário (CSV)", csv, f"itinerario_{datetime.now().strftime('%H%M')}.csv", "text/csv", use_container_width=True)
         
         if st.button("🗑️ Nova Rota", use_container_width=True):
-            st.session_state.resultado_v9 = None
+            st.session_state.resultado_v93 = None
             st.rerun()
 
     with c_map:
         m = folium.Map(location=[r['unidade']['lat'], r['unidade']['lon']], zoom_start=12)
-        folium.Marker([r['unidade']['lat'], r['unidade']['lon']], icon=folium.Icon(color='green', icon='home')).add_to(m)
+        
+        # --- RECOLOCADO TOOLTIP NA UNIDADE ---
+        folium.Marker(
+            [r['unidade']['lat'], r['unidade']['lon']], 
+            icon=folium.Icon(color='green', icon='home'),
+            tooltip=f"<b>Unidade:</b> {r['unidade']['nome']}"
+        ).add_to(m)
+        
+        # --- RECOLOCADO TOOLTIP NAS PARADAS ---
         for p in r['pontos']:
-            folium.Marker([p['lat'], p['lon']], icon=folium.Icon(color='blue')).add_to(m)
+            folium.Marker(
+                [p['lat'], p['lon']], 
+                icon=folium.Icon(color='blue'),
+                tooltip=f"<b>Destino:</b> {p['endereco']}<br><b>CEP:</b> {p['cep']}"
+            ).add_to(m)
+            
         folium.PolyLine(r['geo'], color="#2E86C1", weight=6).add_to(m)
-        st_folium(m, use_container_width=True, height=500, key="mapa_v92")
+        st_folium(m, use_container_width=True, height=500, key="mapa_v93")
