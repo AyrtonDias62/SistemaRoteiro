@@ -5,7 +5,6 @@ import openrouteservice
 from openrouteservice import client
 import folium
 from streamlit_folium import st_folium
-from datetime import datetime
 import math
 import base64
 from PIL import Image
@@ -18,25 +17,17 @@ st.set_page_config(
     page_icon="🚚"
 )
 
-# --- CSS REVISADO (EQUILÍBRIO ENTRE ESPAÇO E VISIBILIDADE) ---
+# --- CSS REVISADO (EQUILÍBRIO DE ESPAÇO) ---
 st.markdown("""
     <style>
-    /* Ajuste fino do topo para não cortar o título */
     .block-container {
         padding-top: 2rem; 
         padding-bottom: 0rem;
-        padding-left: 3rem;
-        padding-right: 3rem;
     }
-    /* Estilização das métricas para ficarem horizontais e limpas */
     [data-testid="stMetric"] {
         background-color: #f0f2f6;
         padding: 5px 15px;
         border-radius: 10px;
-    }
-    /* Reduz espaço entre elementos do Streamlit */
-    .element-container {
-        margin-bottom: 0.5rem;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -67,23 +58,19 @@ def get_coords_cep(cep, client_ors):
         geo = client_ors.pelias_search(text=f"{logra}, {cidade}, SP, Brasil", size=1, focus_point=[-46.55, -23.69])
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
-            lat, lon = c[1], c[0]
-        else:
-            geo_cep = client_ors.pelias_search(text=f"{cep}, Brasil", size=1)
-            c = geo_cep['features'][0]['geometry']['coordinates']
-            lat, lon = c[1], c[0]
-        return {"lat": lat, "lon": lon, "endereco": f"{logra}, {bairro}"}
+            return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {bairro}"}
+        return None
     except:
         return None
 
 # --- 3. ASSETS E API ---
-img_b64 = get_image_base64("furgao_tecnolab.png")
+img_b64 = get_image_base64("furgao_tecnolab3.png")
 
 try:
     api_key = st.secrets["ORS_KEY"]
     ors_client = client.Client(key=api_key)
 except:
-    st.error("Erro: Verifique a ORS_KEY.")
+    st.error("Erro: Verifique a ORS_KEY nas Secrets.")
     st.stop()
 
 unidades = [
@@ -97,32 +84,35 @@ unidades = [
 if "resultado_rota" not in st.session_state:
     st.session_state.resultado_rota = None
 
-# --- 4. TÍTULO (VOLTANDO AO TAMANHO VISÍVEL) ---
+# --- 4. TÍTULO ---
 if img_b64:
     st.markdown(
         f"""
         <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
             <img src="{img_b64}" height="45">
-            <h2 style="color: #2E86C1; margin: 0; font-family: sans-serif;">Roteirizador Tecnolab</h2>
+            <h2 style="color: #2E86C1; margin: 0;">Roteirizador Tecnolab</h2>
         </div>
         """, unsafe_allow_html=True
     )
 else:
     st.title("Roteirizador Tecnolab")
 
-# --- 5. BARRA LATERAL ---
+# --- 5. BARRA LATERAL (CEPs INDEPENDENTES) ---
 with st.sidebar:
     st.header("📍 Itinerário")
-    ceps_input = []
+    ceps_finais = []
     for i in range(5):
-        c = st.text_input(f"CEP {i+1}:", key=f"v77_cep_{i}")
-        if c: ceps_input.append(c)
+        # Cada campo tem sua chave única 'cep_slot_X' para evitar replicação
+        entrada = st.text_input(f"CEP Parada {i+1}:", value="", key=f"cep_slot_{i}")
+        if entrada:
+            ceps_finais.append(entrada)
+    
     btn_calc = st.button("Gerar Rota Otimizada", use_container_width=True)
 
-if btn_calc and ceps_input:
-    with st.spinner("Processando..."):
+if btn_calc and ceps_finais:
+    with st.spinner("Calculando percurso..."):
         destinos = []
-        for cp in ceps_input:
+        for cp in ceps_finais:
             info = get_coords_cep(cp, ors_client)
             if info: destinos.append(info)
         
@@ -139,11 +129,11 @@ if btn_calc and ceps_input:
             res_api = ors_client.directions(coordinates=coords, profile='driving-car', format='geojson', optimize_waypoints=True)
             
             segs = res_api['features'][0]['properties']['segments']
-            tabela = []
+            tabela_data = []
             for idx, s in enumerate(segs):
-                tabela.append({
-                    "Origem": labels[idx].replace(", São Bernardo do Campo", ""),
-                    "Destino": labels[idx+1].replace(", São Bernardo do Campo", ""),
+                tabela_data.append({
+                    "Origem": labels[idx].replace(", São Bernardo do Campo", "").replace(", SP", ""),
+                    "Destino": labels[idx+1].replace(", São Bernardo do Campo", "").replace(", SP", ""),
                     "KM": round(s['distance'] / 1000, 2),
                     "Tempo": f"{round(s['duration'] / 60, 1)} min"
                 })
@@ -153,20 +143,19 @@ if btn_calc and ceps_input:
                 "km_total": round(res_api['features'][0]['properties']['summary']['distance'] / 1000, 2),
                 "tempo_total": round(res_api['features'][0]['properties']['summary']['duration'] / 60, 0),
                 "geo": [[p[1], p[0]] for p in res_api['features'][0]['geometry']['coordinates']],
-                "tabela": tabela
+                "tabela": tabela_data
             }
 
-# --- 6. EXIBIÇÃO DOS RESULTADOS ---
+# --- 6. EXIBIÇÃO ---
 if st.session_state.resultado_rota:
     r = st.session_state.resultado_rota
     
-    # Resumo em colunas
     c1, c2, c3 = st.columns(3)
     c1.metric("Unidade Base", r['unidade']['nome'])
     c2.metric("Distância Total", f"{r['km_total']} km")
     c3.metric("Tempo Previsto", f"{int(r['tempo_total'])} min")
 
-    st.write("") # Pequeno respiro
+    st.write("") 
 
     col_t, col_m = st.columns([1, 1.2])
 
@@ -174,7 +163,11 @@ if st.session_state.resultado_rota:
         st.markdown("##### 📋 Trechos Detalhados")
         st.dataframe(pd.DataFrame(r['tabela']), use_container_width=True, hide_index=True, height=300)
         
-        if st.button("🗑️ Limpar Mapa", use_container_width=True):
+        if st.button("🗑️ Nova Rota", use_container_width=True):
+            # Limpa especificamente as chaves de entrada para zerar o formulário
+            for key in st.session_state.keys():
+                if "cep_slot_" in key:
+                    st.session_state[key] = ""
             st.session_state.resultado_rota = None
             st.rerun()
 
@@ -185,6 +178,6 @@ if st.session_state.resultado_rota:
         for i, d in enumerate(r['paradas']):
             folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Ponto {i+1}").add_to(m)
         folium.PolyLine(r['geo'], color="#2E86C1", weight=6, opacity=0.8).add_to(m)
-        st_folium(m, use_container_width=True, height=500, key="mapa_v77")
+        st_folium(m, use_container_width=True, height=500, key="mapa_final_v79")
 else:
-    st.info("Insira os destinos na barra lateral para começar.")
+    st.info("Insira os CEPs individualmente na barra lateral para gerar o roteiro Tecnolab.")
