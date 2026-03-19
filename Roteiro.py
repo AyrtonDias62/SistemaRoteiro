@@ -29,7 +29,25 @@ def get_image_base64(path):
 
 # Tenta carregar a imagem do furgão. Substitua pelo nome real do seu arquivo.
 try:
-    img_b64 = get_image_base64("furgao_tecnolab3.png")
+    # 1. TÍTULO INTEGRADO COM O FURGÃO (HTML/CSS EM UMA LINHA)
+    if img_b64:
+        # Ajustamos o tamanho (height="32") para ficar da altura de um título padrão (h2)
+        # E usamos flexbox para alinhar perfeitamente o ícone com o texto.
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+                <img src="{img_b64}" height="32" style="margin-top: -2px;">
+                <h2 style="color: #2E86C1; margin: 0; padding: 0;">Painel de Roteirização Tecnolab3</h2>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+    else:
+        # Fallback caso a imagem não carregue
+        st.title("Painel de Roteirização Tecnolab3")
+    
+    st.divider()
+
 except:
     st.error("Erro: Verifique se o arquivo 'furgao_tecnolab3.png' está na mesma pasta do código.")
     img_b64 = None
