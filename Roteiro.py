@@ -9,7 +9,7 @@ from datetime import datetime
 import math
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Logístico V7.1", layout="wide")
+st.set_page_config(page_title="Roteirizador Logístico V7.2 - Detalhado", layout="wide")
 
 try:
     api_key = st.secrets["ORS_KEY"]
@@ -34,49 +34,52 @@ unidades = [
     {"nome": "U14", "lat": -23.66884, "lon": -46.45567},
 ]
 
-# --- MEMÓRIA DO APP (SESSION STATE) ---
+# --- MEMÓRIA DO APP ---
 if "resultado_rota" not in st.session_state:
     st.session_state.resultado_rota = None
 
-# --- FUNÇÕES ---
 def get_coords_cep(cep):
     r = requests.get(f"https://viacep.com.br/ws/{cep.replace('-','')}/json/").json()
     if "erro" in r: return None
-    logra, cidade = r.get('logradouro', ''), r.get('localidade', '')
+    logra, bairro, cidade = r.get('logradouro', ''), r.get('bairro', ''), r.get('localidade', '')
     geo = ors_client.pelias_search(text=f"{logra}, {cidade}, SP, Brasil", size=1, focus_point=[-46.55, -23.69])
     if geo and len(geo['features']) > 0:
         c = geo['features'][0]['geometry']['coordinates']
-        return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {r.get('bairro')}"}
+        return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {bairro}"}
     return None
 
 # --- INTERFACE ---
-st.title("🚚 Planejador de Roteiros Multi-Paradas")
+st.title("🚚 Planejador de Roteiros com Detalhamento de Trechos")
 
 with st.sidebar:
-    st.header("Entrada de Dados")
+    st.header("Entrada de CEPs")
     ceps_input = []
     for i in range(5):
         c = st.text_input(f"CEP Destino {i+1}:", key=f"input_cep_{i}")
         if c: ceps_input.append(c)
     
-    if st.button("Gerar Melhor Rota", use_container_width=True):
+    if st.button("Calcular Roteiro Completo", use_container_width=True):
         if ceps_input:
-            with st.spinner("Processando roteiro..."):
+            with st.spinner("Calculando e otimizando percurso..."):
                 lista_destinos = []
                 for c in ceps_input:
                     info = get_coords_cep(c)
                     if info: lista_destinos.append(info)
                 
                 if lista_destinos:
-                    # Seleção da Unidade Base (mais próxima do 1º CEP)
-                    primeiro = lista_destinos[0]
-                    unidade_base = min(unidades, key=lambda u: (u['lat']-primeiro['lat'])**2 + (u['lon']-primeiro['lon'])**2)
+                    # Unidade mais próxima do primeiro CEP
+                    p1 = lista_destinos[0]
+                    unid_base = min(unidades, key=lambda u: (u['lat']-p1['lat'])**2 + (u['lon']-p1['lon'])**2)
                     
-                    coords_rota = [[unidade_base['lon'], unidade_base['lat']]]
+                    coords_rota = [[unid_base['lon'], unid_base['lat']]]
+                    nomes_pontos = [unid_base['nome']]
                     for d in lista_destinos:
                         coords_rota.append([d['lon'], d['lat']])
-                    coords_rota.append([unidade_base['lon'], unidade_base['lat']])
+                        nomes_pontos.append(d['endereco'])
+                    coords_rota.append([unid_base['lon'], unid_base['lat']])
+                    nomes_pontos.append(f"Retorno {unid_base['nome']}")
 
+                    # Chamada Directions
                     rota_res = ors_client.directions(
                         coordinates=coords_rota,
                         profile='driving-car',
@@ -84,50 +87,59 @@ with st.sidebar:
                         optimize_waypoints=True
                     )
                     
-                    # Salva TUDO na memória para não sumir
+                    # Extração de trechos (Segments)
+                    segments = rota_res['features'][0]['properties']['segments']
+                    detalhes_trechos = []
+                    for idx, seg in enumerate(segments):
+                        detalhes_trechos.append({
+                            "De": nomes_pontos[idx],
+                            "Para": nomes_pontos[idx+1],
+                            "Distância (km)": round(seg['distance'] / 1000, 2),
+                            "Tempo (min)": round(seg['duration'] / 60, 1)
+                        })
+
                     st.session_state.resultado_rota = {
-                        "unidade": unidade_base,
+                        "unidade": unid_base,
                         "destinos": lista_destinos,
-                        "distancia": round(rota_res['features'][0]['properties']['summary']['distance'] / 1000, 2),
-                        "tempo": round(rota_res['features'][0]['properties']['summary']['duration'] / 60, 0),
-                        "caminho": [[p[1], p[0]] for p in rota_res['features'][0]['geometry']['coordinates']]
+                        "distancia_total": round(rota_res['features'][0]['properties']['summary']['distance'] / 1000, 2),
+                        "tempo_total": round(rota_res['features'][0]['properties']['summary']['duration'] / 60, 0),
+                        "caminho_geom": [[p[1], p[0]] for p in rota_res['features'][0]['geometry']['coordinates']],
+                        "quadro_trechos": detalhes_trechos
                     }
                 else:
-                    st.error("Nenhum CEP válido foi encontrado.")
-        else:
-            st.warning("Insira pelo menos um CEP.")
+                    st.error("Nenhum CEP válido encontrado.")
 
-# --- EXIBIÇÃO (SÓ APARECE SE HOUVER RESULTADO NA MEMÓRIA) ---
+# --- EXIBIÇÃO ---
 if st.session_state.resultado_rota:
     res = st.session_state.resultado_rota
-    col1, col2 = st.columns([1, 2])
     
-    with col1:
-        st.success(f"**Unidade de Partida:** {res['unidade']['nome']}")
-        st.metric("Distância Total", f"{res['distancia']} km")
-        st.metric("Tempo Estimado", f"{int(res['tempo'])} min")
-        
-        st.write("📍 **Sequência:**")
-        st.caption(f"1. 🏠 Saída: {res['unidade']['nome']}")
-        for i, d in enumerate(res['destinos']):
-            st.caption(f"{i+2}. 📦 {d['endereco']}")
-        st.caption(f"{len(res['destinos'])+2}. 🏁 Retorno: {res['unidade']['nome']}")
+    # Métricas de Resumo
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Unidade Base", res['unidade']['nome'])
+    m2.metric("Distância Total", f"{res['distancia_total']} km")
+    m3.metric("Tempo Total Estimado", f"{int(res['tempo_total'])} min")
 
-        if st.button("🗑️ Limpar Roteiro"):
+    st.divider()
+    
+    col_map, col_table = st.columns([1.2, 1])
+
+    with col_table:
+        st.subheader("📋 Quadro de Trajetos")
+        df_trechos = pd.DataFrame(res['quadro_trechos'])
+        st.dataframe(df_trechos, use_container_width=True, hide_index=True)
+        
+        st.info("💡 Os tempos acima consideram apenas o deslocamento (sem o tempo de parada no cliente).")
+        
+        if st.button("🗑️ Resetar Sistema"):
             st.session_state.resultado_rota = None
             st.rerun()
-    
-    with col2:
+
+    with col_map:
         m = folium.Map(location=[res['unidade']['lat'], res['unidade']['lon']], zoom_start=12)
-        folium.Marker([res['unidade']['lat'], res['unidade']['lon']], 
-                      icon=folium.Icon(color='green', icon='home')).add_to(m)
+        folium.Marker([res['unidade']['lat'], res['unidade']['lon']], icon=folium.Icon(color='green', icon='home')).add_to(m)
         
         for i, d in enumerate(res['destinos']):
-            folium.Marker([d['lat'], d['lon']], 
-                          icon=folium.Icon(color='blue', icon='shopping-cart'),
-                          tooltip=f"Parada {i+1}: {d['endereco']}").add_to(m)
+            folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Parada {i+1}").add_to(m)
         
-        folium.PolyLine(res['caminho'], color="red", weight=4, opacity=0.7).add_to(m)
-        st_folium(m, use_container_width=True, height=600, key="mapa_roteiro")
-else:
-    st.info("Digite os CEPs na lateral e clique em 'Gerar Melhor Rota'.")
+        folium.PolyLine(res['caminho_geom'], color="red", weight=4, opacity=0.7).add_to(m)
+        st_folium(m, use_container_width=True, height=500, key="mapa_v72")
