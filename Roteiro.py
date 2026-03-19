@@ -17,17 +17,27 @@ st.set_page_config(
     page_icon="🚚"
 )
 
-# --- CSS REVISADO (EQUILÍBRIO DE ESPAÇO) ---
+# --- CSS ADAPTÁVEL (LIGHT/DARK MODE) ---
 st.markdown("""
     <style>
     .block-container {
         padding-top: 2rem; 
         padding-bottom: 0rem;
     }
+    /* Estilização das métricas adaptável ao tema */
     [data-testid="stMetric"] {
-        background-color: #f0f2f6;
-        padding: 5px 15px;
+        background-color: var(--secondary-background-color);
+        padding: 10px 15px;
         border-radius: 10px;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+    }
+    /* Força o label e o valor da métrica a seguirem a cor do tema */
+    [data-testid="stMetricLabel"] > div {
+        color: var(--text-color) !important;
+        opacity: 0.8;
+    }
+    [data-testid="stMetricValue"] > div {
+        color: var(--text-color) !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -64,13 +74,14 @@ def get_coords_cep(cep, client_ors):
         return None
 
 # --- 3. ASSETS E API ---
-img_b64 = get_image_base64("furgao_tecnolab.png")
+# Nota: Certifique-se que o nome do arquivo de imagem está correto no seu repositório
+img_b64 = get_image_base64("furgao_tecnolab3.png")
 
 try:
     api_key = st.secrets["ORS_KEY"]
     ors_client = client.Client(key=api_key)
 except:
-    st.error("Erro: Verifique a ORS_KEY nas Secrets.")
+    st.error("Erro: Configure a ORS_KEY nas Secrets.")
     st.stop()
 
 unidades = [
@@ -102,8 +113,7 @@ with st.sidebar:
     st.header("📍 Itinerário")
     ceps_finais = []
     for i in range(5):
-        # Cada campo tem sua chave única 'cep_slot_X' para evitar replicação
-        entrada = st.text_input(f"CEP Parada {i+1}:", value="", key=f"cep_slot_{i}")
+        entrada = st.text_input(f"CEP Parada {i+1}:", value="", key=f"cep_v8_{i}")
         if entrada:
             ceps_finais.append(entrada)
     
@@ -150,6 +160,7 @@ if btn_calc and ceps_finais:
 if st.session_state.resultado_rota:
     r = st.session_state.resultado_rota
     
+    # Métricas Adaptáveis
     c1, c2, c3 = st.columns(3)
     c1.metric("Unidade Base", r['unidade']['nome'])
     c2.metric("Distância Total", f"{r['km_total']} km")
@@ -164,20 +175,19 @@ if st.session_state.resultado_rota:
         st.dataframe(pd.DataFrame(r['tabela']), use_container_width=True, hide_index=True, height=300)
         
         if st.button("🗑️ Nova Rota", use_container_width=True):
-            # Limpa especificamente as chaves de entrada para zerar o formulário
-            for key in st.session_state.keys():
-                if "cep_slot_" in key:
+            for key in list(st.session_state.keys()):
+                if "cep_v8_" in key:
                     st.session_state[key] = ""
             st.session_state.resultado_rota = None
             st.rerun()
 
     with col_m:
-        st.markdown("##### 🗺️ Roteiro do Deslocamento")
+        st.markdown("##### 🗺️ Mapa da Frota")
         m = folium.Map(location=[r['unidade']['lat'], r['unidade']['lon']], zoom_start=12)
         folium.Marker([r['unidade']['lat'], r['unidade']['lon']], icon=folium.Icon(color='green', icon='home')).add_to(m)
         for i, d in enumerate(r['paradas']):
-            folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Ponto {i+1}").add_to(m)
+            folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Parada {i+1}").add_to(m)
         folium.PolyLine(r['geo'], color="#2E86C1", weight=6, opacity=0.8).add_to(m)
-        st_folium(m, use_container_width=True, height=500, key="mapa_final_v79")
+        st_folium(m, use_container_width=True, height=500, key="mapa_final_v8")
 else:
     st.info("Insira os CEPs individualmente na barra lateral para gerar o roteiro Tecnolab.")
