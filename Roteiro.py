@@ -142,6 +142,8 @@ if btn_calc and ceps_finais:
             tabela_data = []
             for idx, s in enumerate(segs):
                 tabela_data.append({
+                    "Origem": labels[idx].replace(", SP", ""),
+                    "Destino": labels[idx+1].replace(", SP", ""), 
                     "KM": round(s['distance'] / 1000, 2),
                     "Tempo": f"{round(s['duration'] / 60, 1)} min"
                 })
