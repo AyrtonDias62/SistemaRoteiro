@@ -9,7 +9,7 @@ from datetime import datetime
 import math
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Logístico V7.2 - Detalhado", layout="wide")
+st.set_page_config(page_title="Roteirizador V7.3 - Tempos e Percursos", layout="wide")
 
 try:
     api_key = st.secrets["ORS_KEY"]
@@ -34,14 +34,14 @@ unidades = [
     {"nome": "U14", "lat": -23.66884, "lon": -46.45567},
 ]
 
-# --- MEMÓRIA DO APP ---
 if "resultado_rota" not in st.session_state:
     st.session_state.resultado_rota = None
 
 def get_coords_cep(cep):
     r = requests.get(f"https://viacep.com.br/ws/{cep.replace('-','')}/json/").json()
     if "erro" in r: return None
-    logra, bairro, cidade = r.get('logradouro', ''), r.get('bairro', ''), r.get('localidade', '')
+    logra, bairro, cidade = r.get('logradouro', 'N/A'), r.get('bairro', 'N/A'), r.get('localidade', 'N/A')
+    # Busca com foco em SBC/SP para evitar erros de cidades homônimas
     geo = ors_client.pelias_search(text=f"{logra}, {cidade}, SP, Brasil", size=1, focus_point=[-46.55, -23.69])
     if geo and len(geo['features']) > 0:
         c = geo['features'][0]['geometry']['coordinates']
@@ -49,37 +49,39 @@ def get_coords_cep(cep):
     return None
 
 # --- INTERFACE ---
-st.title("🚚 Planejador de Roteiros com Detalhamento de Trechos")
+st.title("🚚 Gestão de Rotas: Tempos e Distâncias")
 
 with st.sidebar:
-    st.header("Entrada de CEPs")
+    st.header("Configurar Roteiro")
+    st.info("Insira os CEPs na ordem desejada ou deixe que o sistema otimize a sequência.")
     ceps_input = []
     for i in range(5):
-        c = st.text_input(f"CEP Destino {i+1}:", key=f"input_cep_{i}")
+        c = st.text_input(f"Parada {i+1} (CEP):", key=f"cep_v73_{i}")
         if c: ceps_input.append(c)
     
-    if st.button("Calcular Roteiro Completo", use_container_width=True):
+    if st.button("Gerar Relatório de Viagem", use_container_width=True):
         if ceps_input:
-            with st.spinner("Calculando e otimizando percurso..."):
+            with st.spinner("Analisando tráfego e distâncias..."):
                 lista_destinos = []
                 for c in ceps_input:
                     info = get_coords_cep(c)
                     if info: lista_destinos.append(info)
                 
                 if lista_destinos:
-                    # Unidade mais próxima do primeiro CEP
+                    # Define a unidade de saída (mais próxima da 1ª parada)
                     p1 = lista_destinos[0]
                     unid_base = min(unidades, key=lambda u: (u['lat']-p1['lat'])**2 + (u['lon']-p1['lon'])**2)
                     
+                    # Monta a lista de pontos (Unidade -> Clientes -> Unidade)
                     coords_rota = [[unid_base['lon'], unid_base['lat']]]
-                    nomes_pontos = [unid_base['nome']]
+                    nomes_labels = [f"Início: {unid_base['nome']}"]
                     for d in lista_destinos:
                         coords_rota.append([d['lon'], d['lat']])
-                        nomes_pontos.append(d['endereco'])
+                        nomes_labels.append(d['endereco'])
                     coords_rota.append([unid_base['lon'], unid_base['lat']])
-                    nomes_pontos.append(f"Retorno {unid_base['nome']}")
+                    nomes_labels.append(f"Retorno: {unid_base['nome']}")
 
-                    # Chamada Directions
+                    # API Call
                     rota_res = ors_client.directions(
                         coordinates=coords_rota,
                         profile='driving-car',
@@ -87,15 +89,15 @@ with st.sidebar:
                         optimize_waypoints=True
                     )
                     
-                    # Extração de trechos (Segments)
+                    # Processa os segmentos (trechos individuais)
                     segments = rota_res['features'][0]['properties']['segments']
-                    detalhes_trechos = []
+                    percursos_detalhados = []
                     for idx, seg in enumerate(segments):
-                        detalhes_trechos.append({
-                            "De": nomes_pontos[idx],
-                            "Para": nomes_pontos[idx+1],
-                            "Distância (km)": round(seg['distance'] / 1000, 2),
-                            "Tempo (min)": round(seg['duration'] / 60, 1)
+                        percursos_detalhados.append({
+                            "Origem": nomes_labels[idx],
+                            "Destino": nomes_labels[idx+1],
+                            "KM": round(seg['distance'] / 1000, 2),
+                            "Tempo Est.": f"{round(seg['duration'] / 60, 1)} min"
                         })
 
                     st.session_state.resultado_rota = {
@@ -103,43 +105,57 @@ with st.sidebar:
                         "destinos": lista_destinos,
                         "distancia_total": round(rota_res['features'][0]['properties']['summary']['distance'] / 1000, 2),
                         "tempo_total": round(rota_res['features'][0]['properties']['summary']['duration'] / 60, 0),
-                        "caminho_geom": [[p[1], p[0]] for p in rota_res['features'][0]['geometry']['coordinates']],
-                        "quadro_trechos": detalhes_trechos
+                        "caminho": [[p[1], p[0]] for p in rota_res['features'][0]['geometry']['coordinates']],
+                        "tabela": percursos_detalhados
                     }
                 else:
-                    st.error("Nenhum CEP válido encontrado.")
+                    st.error("Erro ao validar os CEPs.")
 
-# --- EXIBIÇÃO ---
+# --- EXIBIÇÃO DOS RESULTADOS ---
 if st.session_state.resultado_rota:
     res = st.session_state.resultado_rota
     
-    # Métricas de Resumo
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Unidade Base", res['unidade']['nome'])
-    m2.metric("Distância Total", f"{res['distancia_total']} km")
-    m3.metric("Tempo Total Estimado", f"{int(res['tempo_total'])} min")
+    # Resumo Executivo
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("Base de Operação", res['unidade']['nome'])
+    col_m2.metric("Total da Rota", f"{res['distancia_total']} km")
+    col_m3.metric("Tempo em Trânsito", f"{int(res['tempo_total'])} min")
 
     st.divider()
     
-    col_map, col_table = st.columns([1.2, 1])
+    col_left, col_right = st.columns([1.3, 1])
 
-    with col_table:
-        st.subheader("📋 Quadro de Trajetos")
-        df_trechos = pd.DataFrame(res['quadro_trechos'])
-        st.dataframe(df_trechos, use_container_width=True, hide_index=True)
+    with col_left:
+        st.subheader("📋 Quadro de Percursos Detalhado")
+        df = pd.DataFrame(res['tabela'])
+        # Estilizando a tabela para melhor leitura
+        st.dataframe(df, use_container_width=True, hide_index=True)
         
-        st.info("💡 Os tempos acima consideram apenas o deslocamento (sem o tempo de parada no cliente).")
+        st.warning("⚠️ O tempo estimado não inclui o tempo de permanência em cada cliente.")
         
-        if st.button("🗑️ Resetar Sistema"):
+        if st.button("🗑️ Limpar e Nova Rota", use_container_width=True):
             st.session_state.resultado_rota = None
             st.rerun()
 
-    with col_map:
+    with col_right:
+        st.subheader("🗺️ Mapa do Itinerário")
         m = folium.Map(location=[res['unidade']['lat'], res['unidade']['lon']], zoom_start=12)
-        folium.Marker([res['unidade']['lat'], res['unidade']['lon']], icon=folium.Icon(color='green', icon='home')).add_to(m)
         
+        # Marcador da Unidade (Base)
+        folium.Marker([res['unidade']['lat'], res['unidade']['lon']], 
+                      icon=folium.Icon(color='green', icon='home'),
+                      tooltip="Ponto de Apoio").add_to(m)
+        
+        # Marcadores das Paradas
         for i, d in enumerate(res['destinos']):
-            folium.Marker([d['lat'], d['lon']], icon=folium.Icon(color='blue'), tooltip=f"Parada {i+1}").add_to(m)
+            folium.Marker([d['lat'], d['lon']], 
+                          icon=folium.Icon(color='blue', icon='user'),
+                          tooltip=f"Parada {i+1}: {d['endereco']}").add_to(m)
         
-        folium.PolyLine(res['caminho_geom'], color="red", weight=4, opacity=0.7).add_to(m)
-        st_folium(m, use_container_width=True, height=500, key="mapa_v72")
+        # Desenho da Rota
+        folium.PolyLine(res['caminho'], color="#E74C3C", weight=5, opacity=0.8).add_to(m)
+        
+        st_folium(m, use_container_width=True, height=450, key="mapa_v73")
+
+else:
+    st.info("Utilize a barra lateral para inserir os destinos e calcular o tempo de percurso.")
