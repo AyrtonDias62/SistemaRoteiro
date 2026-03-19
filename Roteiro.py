@@ -26,14 +26,34 @@ st.markdown("""
 def get_coords_cep(cep, _client_ors):
     try:
         clean_cep = str(cep).replace('-','').replace(' ', '').strip()
-        r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
-        if "erro" in r: return None
-        logra = r.get('logradouro', 'Logradouro não encontrado')
-        geo = _client_ors.pelias_search(text=f"{logra}, São Paulo, Brasil", size=1)
+        
+        # 1. Tentativa Direta no ORS (Mais preciso para coordenadas)
+        # Buscamos pelo CEP + País para evitar ambiguidades
+        geo = _client_ors.pelias_search(text=f"{clean_cep}, Brasil", size=1)
+        
         if geo and len(geo['features']) > 0:
-            c = geo['features'][0]['geometry']['coordinates']
-            return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": cep}
-    except: return None
+            feat = geo['features'][0]
+            c = feat['geometry']['coordinates']
+            # Extrai o nome da rua/bairro retornado pelo próprio ORS para conferência
+            label = feat['properties'].get('label', 'Endereço encontrado')
+            return {"lat": c[1], "lon": c[0], "endereco": label, "cep": cep}
+            
+        # 2. Fallback: Se o ORS falhar, usa ViaCEP + ORS detalhado
+        r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
+        if "erro" not in r:
+            logra = r.get('logradouro')
+            bairro = r.get('bairro')
+            cidade = r.get('localidade')
+            # Busca combinada para maior precisão
+            busca_full = f"{logra}, {bairro}, {cidade}, SP, Brasil"
+            geo_fallback = _client_ors.pelias_search(text=busca_full, size=1)
+            
+            if geo_fallback and len(geo_fallback['features']) > 0:
+                c = geo_fallback['features'][0]['geometry']['coordinates']
+                return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {bairro}", "cep": cep}
+    except Exception as e:
+        print(f"Erro no geocoding: {e}")
+        return None
 
 # --- 3. INICIALIZAÇÃO ---
 try:
