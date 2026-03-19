@@ -10,7 +10,7 @@ from PIL import Image
 import io
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V9.9", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V10.0", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÕES ---
 def get_image_base64(path):
@@ -35,16 +35,6 @@ def get_coords_cep(cep, _client_ors):
             return {"lat": c[1], "lon": c[0], "endereco": f"{logra}, {bairro}", "cep": cep}
     except: return None
 
-def selecionar_melhor_unidade(ponto_destino, lista_unidades, _client_ors):
-    melhor_unid, menor_dist = lista_unidades[0], float('inf')
-    for u in lista_unidades:
-        try:
-            rota = _client_ors.directions(coordinates=[[u['lon'], u['lat']], [ponto_destino['lon'], ponto_destino['lat']]], profile='driving-car')
-            dist = rota['features'][0]['properties']['summary']['distance']
-            if dist < menor_dist: menor_dist = dist; melhor_unid = u
-        except: continue
-    return melhor_unid
-
 # --- 3. SETUP ---
 img_b64 = get_image_base64("furgao_tecnolab.png")
 try:
@@ -60,102 +50,91 @@ unidades = [
     {"nome": "Tecno U13", "lat": -23.68791, "lon": -46.62192},
 ]
 
-if "res_v99" not in st.session_state: st.session_state.res_v99 = None
+if "res_v10" not in st.session_state: st.session_state.res_v10 = None
 
 # --- 4. UI ---
 st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; border-bottom: 2px solid #2E86C1; padding-bottom: 10px;">
     {f'<img src="{img_b64}" height="50">' if img_b64 else ''}
-    <h1 style="color: #2E86C1; margin:0; font-size: 24px;">Roteirizador Tecnolab V9.9</h1>
+    <h1 style="color: #2E86C1; margin:0; font-size: 24px;">Roteirizador Tecnolab V10.0</h1>
 </div>""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("📍 Configuração")
-    tipo_calc = st.selectbox("Estratégia de Rota:", ["Manter Ordem (Lista)", "Otimizar Caminho (IA)"])
-    ceps_in = [st.text_input(f"Parada {i+1}:", key=f"c99_{i}") for i in range(5)]
+    st.header("📍 Painel de Controle")
+    tipo_calc = st.radio("Estratégia:", ["Manter Ordem (Lista Direta)", "Otimizar Rota (Melhor Caminho)"])
+    ceps_in = [st.text_input(f"CEP Parada {i+1}:", key=f"c10_{i}") for i in range(5)]
     ceps_validos = [c for c in ceps_in if c.strip()]
-    btn = st.button("🚀 Calcular Rota", use_container_width=True)
+    btn = st.button("🚀 Gerar Roteiro", use_container_width=True)
 
-# --- 5. LÓGICA DE ROTA ---
+# --- 5. LÓGICA CORE ---
 if btn and ceps_validos:
-    with st.spinner("Otimizando trajeto..."):
-        pontos_originais = []
-        for c in ceps_validos:
-            p = get_coords_cep(c, ors_client)
-            if p: pontos_originais.append(p)
+    with st.spinner("Analisando logradouros..."):
+        pontos_gps = [get_coords_cep(c, ors_client) for c in ceps_validos if get_coords_cep(c, ors_client)]
         
-        if pontos_originais:
-            u_base = selecionar_melhor_unidade(pontos_originais[0], unidades, ors_client)
-            # Coordenadas: [Base, P1, P2, P3, P4, P5, Base]
-            coords_input = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pontos_originais] + [[u_base['lon'], u_base['lat']]]
+        if pontos_gps:
+            # Seleção da base (sempre fixa como início e fim)
+            u_base = unidades[0] # Ou use sua função selecionar_melhor_unidade
+            coords_input = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pontos_gps] + [[u_base['lon'], u_base['lat']]]
             
-            geo_final = []
-            tabela = []
-            pontos_ordenados_mapa = []
+            try:
+                otimizar = (tipo_calc == "Otimizar Rota (Melhor Caminho)")
+                res = ors_client.directions(coordinates=coords_input, profile='driving-car', format='geojson', optimize_waypoints=otimizar)
+                
+                # RECONSTRUÇÃO DA ORDEM DOS PONTOS
+                if otimizar and 'waypoint_order' in res['metadata']['query']:
+                    ordem_indices = [0] + [i + 1 for i in res['metadata']['query']['waypoint_order']] + [len(coords_input)-1]
+                else:
+                    ordem_indices = list(range(len(coords_input)))
 
-            # --- MODO 1: LISTA DIRETA ---
-            if tipo_calc == "Manter Ordem (Lista)":
-                labels_lista = [u_base['nome']] + [f"{p['endereco']} ({p['cep']})" for p in pontos_originais] + [f"Fim: {u_base['nome']}"]
-                for i in range(len(coords_input) - 1):
-                    res = ors_client.directions(coordinates=[coords_input[i], coords_input[i+1]], profile='driving-car', format='geojson')
-                    s = res['features'][0]['properties']['summary']
-                    geo_final.extend([[p[1], p[0]] for p in res['features'][0]['geometry']['coordinates']])
+                # Montagem das Labels e Tabela com base na ordem REAL decidida
+                labels_raw = [u_base['nome']] + [f"{p['endereco']} ({p['cep']})" for p in pontos_gps] + [f"Fim: {u_base['nome']}"]
+                labels_finais = [labels_raw[i] for i in ordem_indices]
+                
+                tabela = []
+                segs = res['features'][0]['properties']['segments']
+                for i, s in enumerate(segs):
                     tabela.append({
-                        "Ordem": f"{i+1}º", "De": labels_lista[i], "Para": labels_lista[i+1],
-                        "Distância": f"{round(s['distance']/1000, 2)} km", "Tempo": f"{round(s['duration']/60, 1)} min"
+                        "Passo": f"{i+1}º",
+                        "Origem": labels_finais[i],
+                        "Destino": labels_finais[i+1],
+                        "KM": f"{round(s['distance']/1000, 2)} km",
+                        "Tempo": f"{round(s['duration']/60, 1)} min"
                     })
-                # Para o mapa
-                pontos_ordenados_mapa = [{"lat": u_base['lat'], "lon": u_base['lon'], "label": f"1. Início: {u_base['nome']}", "tipo": "base"}]
-                for i, p in enumerate(pontos_originais):
-                    pontos_ordenados_mapa.append({"lat": p['lat'], "lon": p['lon'], "label": f"{i+2}. {p['endereco']} ({p['cep']})", "tipo": "cliente"})
 
-            # --- MODO 2: OTIMIZAÇÃO IA ---
-            else:
-                res = ors_client.directions(coordinates=coords_input, profile='driving-car', format='geojson', optimize_waypoints=True)
-                # waypoint_order nos diz a ordem dos pontos intermediários (ex: [2, 0, 1] significa que o 3º CEP do input é o primeiro a ser visitado)
-                ordem_ia = res['metadata']['query']['waypoint_order']
-                # Reconstruindo a sequência de índices: [Base (0), ...IA..., Retorno (Final)]
-                idx_sequencia = [0] + [i + 1 for i in ordem_ia] + [len(coords_input)-1]
-                
-                # Labels originais para busca por índice
-                labels_raw = [u_base['nome']] + [f"{p['endereco']} ({p['cep']})" for p in pontos_originais] + [f"Fim: {u_base['nome']}"]
-                labels_finais = [labels_raw[i] for i in idx_sequencia]
-                
-                geo_final = [[p[1], p[0]] for p in res['features'][0]['geometry']['coordinates']]
-                segmentos = res['features'][0]['properties']['segments']
-                
-                for i, s in enumerate(segmentos):
-                    tabela.append({
-                        "Ordem": f"{i+1}º", "De": labels_finais[i], "Para": labels_finais[i+1],
-                        "Distância": f"{round(s['distance']/1000, 2)} km", "Tempo": f"{round(s['duration']/60, 1)} min"
-                    })
-                
-                # Para o mapa (pontos com numeração correta da IA)
-                pontos_ordenados_mapa = [{"lat": u_base['lat'], "lon": u_base['lon'], "label": "1. Início / Fim", "tipo": "base"}]
-                for i, pos_original in enumerate(ordem_ia):
-                    p = pontos_originais[pos_original]
-                    pontos_ordenados_mapa.append({"lat": p['lat'], "lon": p['lon'], "label": f"{i+2}. {p['endereco']} ({p['cep']})", "tipo": "cliente"})
+                # Preparação dos Marcadores para o Mapa com numeração
+                mapa_pontos = []
+                # Início
+                mapa_pontos.append({"lat": u_base['lat'], "lon": u_base['lon'], "txt": f"1. INÍCIO: {u_base['nome']}", "cor": "green"})
+                # Intermediários na ordem correta
+                if otimizar:
+                    for i, pos_orig in enumerate(res['metadata']['query']['waypoint_order']):
+                        p = pontos_gps[pos_orig]
+                        mapa_pontos.append({"lat": p['lat'], "lon": p['lon'], "txt": f"{i+2}. {p['endereco']} | CEP: {p['cep']}", "cor": "blue"})
+                else:
+                    for i, p in enumerate(pontos_gps):
+                        mapa_pontos.append({"lat": p['lat'], "lon": p['lon'], "txt": f"{i+2}. {p['endereco']} | CEP: {p['cep']}", "cor": "blue"})
 
-            st.session_state.res_v99 = {
-                "unidade": u_base, "tabela": tabela, "geo": geo_final, "pontos": pontos_ordenados_mapa, "modo": tipo_calc
-            }
+                st.session_state.res_v10 = {
+                    "tabela": tabela, 
+                    "geo": [[p[1], p[0]] for p in res['features'][0]['geometry']['coordinates']], 
+                    "pontos": mapa_pontos,
+                    "centro": [u_base['lat'], u_base['lon']]
+                }
+            except Exception as e: st.error(f"Erro na API: {e}")
 
 # --- 6. DISPLAY ---
-if st.session_state.res_v99:
-    r = st.session_state.res_v99
-    col_t, col_m = st.columns([1.2, 1])
+if st.session_state.res_v10:
+    r = st.session_state.res_v10
+    col1, col2 = st.columns([1.2, 1])
     
-    with col_t:
-        st.subheader(f"📋 Itinerário: {r['modo']}")
+    with col1:
+        st.subheader("📋 Itinerário Ordenado")
         st.dataframe(pd.DataFrame(r['tabela']), use_container_width=True, hide_index=True)
-        if st.button("🗑️ Nova Rota"): 
-            st.session_state.res_v99 = None
-            st.rerun()
+        if st.button("🗑️ Nova Rota"): st.session_state.res_v10 = None; st.rerun()
 
-    with col_m:
-        st.subheader("🗺️ Ordem das Paradas")
-        m = folium.Map(location=[r['unidade']['lat'], r['unidade']['lon']], zoom_start=12)
+    with col2:
+        st.subheader("🗺️ Visualização da Ordem")
+        m = folium.Map(location=r['centro'], zoom_start=12)
         for p in r['pontos']:
-            cor = 'green' if p['tipo'] == 'base' else 'blue'
-            folium.Marker([p['lat'], p['lon']], icon=folium.Icon(color=cor), tooltip=p['label']).add_to(m)
+            folium.Marker([p['lat'], p['lon']], icon=folium.Icon(color=p['cor']), tooltip=p['txt']).add_to(m)
         folium.PolyLine(r['geo'], color="#2E86C1", weight=6).add_to(m)
-        st_folium(m, use_container_width=True, height=500, key="map99")
+        st_folium(m, use_container_width=True, height=500, key="map10")
