@@ -143,8 +143,13 @@ if "res_v107" in st.session_state:
     
     # Botão de PDF
     pdf_bytes = gerar_pdf(res['tabela'], res['dist_total'])
-    st.download_button("label": "📥 Baixar Itinerário em PDF", "data": pdf_bytes, "file_name": "rota_tecnolab.pdf", "mime": "application/pdf")
-
+    st.download_button(
+        label="📥 Baixar Itinerário em PDF", 
+        data=pdf_bytes, 
+        file_name="rota_tecnolab.pdf", 
+        mime="application/pdf"
+    )
+    
     c1, c2 = st.columns([1, 1.4])
     with c1:
         st.dataframe(pd.DataFrame(res['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
