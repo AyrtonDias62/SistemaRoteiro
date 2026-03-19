@@ -64,7 +64,7 @@ def get_coords_cep(cep, client_ors):
         return None
 
 # --- 3. ASSETS E API ---
-img_b64 = get_image_base64("furgao_tecnolab3.png")
+img_b64 = get_image_base64("furgao_tecnolab.png")
 
 try:
     api_key = st.secrets["ORS_KEY"]
