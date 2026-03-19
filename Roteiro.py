@@ -172,7 +172,7 @@ if st.session_state.resultado_rota:
             st.rerun()
 
     with col_m:
-        st.markdown("##### 🗺️ Mapa da Frota")
+        st.markdown("##### 🗺️ Roteiro do Deslocamento")
         m = folium.Map(location=[r['unidade']['lat'], r['unidade']['lon']], zoom_start=12)
         folium.Marker([r['unidade']['lat'], r['unidade']['lon']], icon=folium.Icon(color='green', icon='home')).add_to(m)
         for i, d in enumerate(r['paradas']):
