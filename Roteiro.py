@@ -7,7 +7,7 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V14.0", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V14.1", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÃO DE COORDENADAS ---
 @st.cache_data(show_spinner=False)
@@ -35,13 +35,16 @@ u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep
 # --- 4. INTERFACE ---
 with st.sidebar:
     st.header("🚚 Sistema Tecnolab")
-    modo = st.selectbox("Escolha o Comportamento:", ["1. Roteiro Travado (Ordem do Input)", "2. Roteiro Inteligente (Otimizado/Circular)"])
+    modo = st.selectbox("Escolha o Comportamento:", [
+        "1. Roteiro Travado (Ordem do Input)", 
+        "2. Roteiro Inteligente (Otimizado/Circular)"
+    ])
     st.divider()
     ceps_raw = []
     for i in range(5):
-        c = st.text_input(f"CEP {i+1}", key=f"c_v14_{i}")
+        c = st.text_input(f"CEP {i+1}", key=f"c_v141_{i}")
         if c: ceps_raw.append(c)
-    btn = st.button("🚀 CALCULAR AGORA", use_container_width=True, type="primary")
+    btn = st.button("🚀 CALCULAR ROTA", use_container_width=True, type="primary")
 
 # --- 5. EXECUÇÃO ---
 if btn and ceps_raw:
@@ -54,30 +57,47 @@ if btn and ceps_raw:
         st.error("Nenhum CEP válido."); st.stop()
 
     try:
-        # --- ESTRUTURA B: OTIMIZADO (O CAMINHO CIRCULAR DAS VERSÕES INICIAIS) ---
+        # --- ESTRUTURA B: OTIMIZADO (ESTILO CIRCULAR) ---
         if "Inteligente" in modo:
-            # Fazemos uma única chamada "mestra" para a API organizar tudo
-            coords_full = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
+            # Enviamos Base + Pontos (Sem repetir a base no fim para evitar erro de waypoint)
+            coords_full = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps]
+            
             rota_mestra = ors_client.directions(
                 coordinates=coords_full,
                 profile='driving-car',
                 format='geojson',
-                optimize_waypoints=True # A inteligência circular volta aqui
+                optimize_waypoints=True
             )
             
-            # Reconstruímos a tabela baseada na ordem que a IA decidiu
-            ordem_ia = rota_mestra['metadata']['query']['waypoint_order']
+            # TRATAMENTO SEGURO DO WAYPOINT_ORDER
+            # Se a API não devolver a ordem, usamos a ordem original (0, 1, 2...)
+            metadata = rota_mestra.get('metadata', {})
+            query_info = metadata.get('query', {})
+            ordem_ia = query_info.get('waypoint_order', list(range(len(pts_gps))))
+            
             pts_finais = [pts_gps[i] for i in ordem_ia]
+            
+            # No modo inteligente, precisamos calcular o retorno manualmente para garantir os KMs
+            # Então pegamos a geometria da rota mestra e adicionamos a perna de volta
             geometria = [[c[1], c[0]] for c in rota_mestra['features'][0]['geometry']['coordinates']]
-            segs = rota_mestra['features'][0]['properties']['segments']
-            dist_total = round(rota_mestra['features'][0]['properties']['summary']['distance'] / 1000, 2)
-        
+            segs_originais = rota_mestra['features'][0]['properties']['segments']
+            
+            # Cálculo isolado do retorno (Ponto Final -> Base) para evitar os 8km
+            p_ultimo = pts_finais[-1]
+            volta = ors_client.directions(
+                coordinates=[[p_ultimo['lon'], p_ultimo['lat']], [u_base['lon'], u_base['lat']]],
+                profile='driving-car', format='geojson'
+            )
+            
+            # Unindo os dados
+            geometria += [[c[1], c[0]] for c in volta['features'][0]['geometry']['coordinates']]
+            segs = segs_originais + volta['features'][0]['properties']['segments']
+            
         # --- ESTRUTURA A: TRAVADO (PEÇA POR PEÇA) ---
         else:
             pts_finais = pts_gps
             geometria = []
             segs = []
-            dist_total = 0
             percurso = [u_base] + pts_finais + [u_base]
             
             for i in range(len(percurso) - 1):
@@ -86,17 +106,18 @@ if btn and ceps_raw:
                     profile='driving-car', format='geojson'
                 )
                 sumario = trecho['features'][0]['properties']['summary']
-                segs.append(sumario) # Simulamos o formato de segmentos
+                segs.append(sumario)
                 geometria.extend([[c[1], c[0]] for c in trecho['features'][0]['geometry']['coordinates']])
-                dist_total += sumario['distance']
-            dist_total = round(dist_total / 1000, 2)
 
-        # --- MONTAGEM DA TABELA (COMUM PARA OS DOIS, MAS DADOS DIFERENTES) ---
+        # --- MONTAGEM DA TABELA ---
         itinerario = []
         itinerario.append({"Seq": "Saída", "Destino": u_base['endereco'], "Distancia": "0.0 km", "lat": u_base['lat'], "lon": u_base['lon']})
         
+        dist_total_acumulada = 0
         for i, p in enumerate(pts_finais):
-            d_km = round(segs[i]['distance'] / 1000, 2)
+            d_m = segs[i]['distance']
+            d_km = round(d_m / 1000, 2)
+            dist_total_acumulada += d_km
             itinerario.append({
                 "Seq": f"{i+1}º",
                 "Destino": f"{p['endereco']} ({p['cep']})",
@@ -104,25 +125,30 @@ if btn and ceps_raw:
                 "lat": p['lat'], "lon": p['lon']
             })
         
-        # KM de Retorno (Sempre o último segmento da lista)
         d_ret = round(segs[-1]['distance'] / 1000, 2)
+        dist_total_acumulada += d_ret
         itinerario.append({"Seq": "Retorno", "Destino": u_base['endereco'], "Distancia": f"{d_ret} km", "lat": u_base['lat'], "lon": u_base['lon']})
 
-        st.session_state.v14 = {"tabela": itinerario, "mapa": geometria, "total": dist_total}
+        st.session_state.v141 = {
+            "tabela": itinerario, 
+            "mapa": geometria, 
+            "total": round(dist_total_acumulada, 2)
+        }
 
     except Exception as e:
-        st.error(f"Falha: {e}")
+        st.error(f"Erro no processamento: {e}")
 
 # --- 6. EXIBIÇÃO ---
-if "v14" in st.session_state:
-    r = st.session_state.v14
-    st.subheader(f"Total da Rota: {r['total']} km")
+if "v141" in st.session_state:
+    r = st.session_state.v141
+    st.success(f"### Rota Finalizada: {r['total']} km")
+    
     col1, col2 = st.columns([1, 1.2])
     with col1:
         st.dataframe(pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
     with col2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        folium.PolyLine(r['mapa'], color="blue" if "Ordem" in modo else "red", weight=5).add_to(m)
+        folium.PolyLine(r['mapa'], color="blue" if "Travado" in modo else "red", weight=5).add_to(m)
         for i in r['tabela']:
             folium.Marker([i['lat'], i['lon']], tooltip=i['Seq']).add_to(m)
         st_folium(m, use_container_width=True, height=500)
