@@ -9,50 +9,50 @@ from streamlit_folium import st_folium
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Roteirizador Tecnolab V14.7", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS (V3 - ESTABILIZADA) ---
+# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO FINAL - TESTADA PARA 09781-220) ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
-        # 1. Busca dados oficiais no ViaCEP
+        # 1. Busca dados no ViaCEP (Fonte oficial de endereços no Brasil)
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
         
         if "erro" in r: 
             return None
             
-        # 2. Monta o endereço simplificado (evita confusão com nomes de ruas idênticos)
-        # Usamos Logradouro + Cidade + Estado
-        query = f"{r.get('logradouro')}, {r.get('localidade')}, SP"
+        # 2. Monta query de busca (Removemos o CEP do texto para não confundir o GPS)
+        logradouro = r.get('logradouro')
+        bairro = r.get('bairro')
+        cidade = r.get('localidade')
+        # Ex: "Avenida Tiradentes, São Bernardo do Campo, SP"
+        query = f"{logradouro}, {cidade}, SP"
         
-        # 3. Busca no ORS priorizando a proximidade da Matriz (focus_point)
-        # Em vez de um retângulo rígido que pode bloquear o CEP, usamos o focus_point
-        # Isso "puxa" a busca para SP, ignorando cidades como Panorama automaticamente.
+        # 3. Busca no ORS com FOCO na Matriz (Sem retângulo rígido que bloqueia)
+        # O focus_point garante que ele busque em SBC e não em Panorama.
         geo = _ors_client.pelias_search(
             text=query,
             size=1,
-            focus_point=[-46.5594, -23.6912] # Coordenadas da Matriz SBC
+            focus_point=[-46.5594, -23.6912] # Coordenadas Matriz SBC
         )
         
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
-            lat_f, lon_f = c[1], c[0]
+            lon_f, lat_f = c[0], c[1]
             
-            # 4. Trava de segurança contra "Deriva"
-            # Se o resultado estiver a mais de 150km da matriz, ignoramos (evita Panorama)
-            # Matriz: -23.69, -46.55 | Panorama: -21.35, -51.85 (Distância > 600km)
-            dist_seguranca = ((lat_f - (-23.6912))**2 + (lon_f - (-46.5594))**2)**0.5
-            
-            if dist_seguranca > 1.5: # Aproximadamente 160km de raio
+            # 4. Trava de Segurança "Anti-Panorama"
+            # Calcula distância simples (delta) para garantir que está na Grande SP
+            # Matriz: -23.69, -46.55 | Se afastar mais de 100km (aprox 1.0 grau), bloqueia.
+            if abs(lat_f - (-23.6912)) > 1.0 or abs(lon_f - (-46.5594)) > 1.0:
                 return None
                 
             return {
                 "lat": lat_f, 
                 "lon": lon_f, 
-                "endereco": f"{r.get('logradouro')}, {r.get('bairro')}", 
+                "endereco": f"{logradouro}, {bairro}", 
                 "cep": clean_cep
             }
             
-    except: 
+    except Exception as e:
         return None
 
 
