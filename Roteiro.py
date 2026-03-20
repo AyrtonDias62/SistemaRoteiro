@@ -7,51 +7,60 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V14.5", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V14.6", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS  ---
+# --- 2. FUNÇÃO DE COORDENADAS (RESOLVIDO) ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
+        # 1. Limpeza e Consulta via ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
-        if "erro" in r: return None
+        if "erro" in r: 
+            return None
         
-        # Monta o endereço vindo do ViaCEP
-        logra = f"{r.get('logradouro')}, {r.get('bairro')}"
-        cidade = r.get('localidade')
-        query = f"{logra}, {cidade}, SP, Brasil"
+        # 2. Monta query simplificada (Logradouro + Cidade + SP)
+        # CEP no texto as vezes confunde o buscador Pelias; cidade e estado são mais estáveis.
+        query = f"{r.get('logradouro')}, {r.get('localidade')}, SP"
         
-        # Parametros de restrição para Grande SP e Litoral (evita deriva para o interior)
-        # O Pelias no ORS-PY utiliza os argumentos prefixados por 'rect_' ou 'boundary_rect_'
+        # 3. Busca Restrita (Retângulo Grande SP e Litoral)
+        # rect_min_x: longitude oeste | rect_min_y: latitude sul
+        # rect_max_x: longitude leste | rect_max_y: latitude norte
         geo = _ors_client.pelias_search(
             text=query, 
             size=1,
-            rect_min_lon=-47.50, # Oeste (limite Sorocaba)
-            rect_min_lat=-24.50, # Sul (limite Litoral Sul)
-            rect_max_lon=-45.50, # Leste (limite Vale do Paraíba)
-            rect_max_lat=-23.00  # Norte (limite Jundiaí)
+            rect_min_x=-47.50, # Longitude Oeste (Sorocaba)
+            rect_min_y=-24.50, # Latitude Sul (Litoral Sul)
+            rect_max_x=-45.50, # Longitude Leste (Vale do Paraíba)
+            rect_max_y=-23.00  # Latitude Norte (Jundiaí)
         )
         
+        # 4. Processamento do Resultado
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
-            return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": clean_cep}
+            return {
+                "lat": c[1], 
+                "lon": c[0], 
+                "endereco": f"{r.get('logradouro')}, {r.get('bairro')}", 
+                "cep": clean_cep
+            }
         
-        # Caso a busca restrita falhe, tentamos uma busca focada sem o retângulo rígido
-        # mas priorizando a localização da Matriz (focus_point)
-        geo_fallback = _ors_client.pelias_search(
+        # 5. Backup (Focus Point): Se o retângulo falhar, busca perto da Matriz
+        geo_bkp = _ors_client.pelias_search(
             text=query,
             size=1,
-            focus_point=[-46.5594, -23.6912]
+            focus_point=[-46.5594, -23.6912] # Coordenadas Matriz SBC
         )
-        
-        if geo_fallback and len(geo_fallback['features']) > 0:
-            c = geo_fallback['features'][0]['geometry']['coordinates']
-            return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": clean_cep}
+        if geo_bkp and len(geo_bkp['features']) > 0:
+            c = geo_bkp['features'][0]['geometry']['coordinates']
+            return {
+                "lat": c[1], "lon": c[0], 
+                "endereco": f"{r.get('logradouro')}, {r.get('bairro')}", 
+                "cep": clean_cep
+            }
             
     except Exception as e:
         return None
-
 
 # --- 3. SETUP API ---
 try:
