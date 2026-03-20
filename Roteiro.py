@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 from fpdf import FPDF
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V13.0", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V13.1", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÕES AUXILIARES ---
 @st.cache_data(show_spinner=False)
@@ -60,11 +60,11 @@ with st.sidebar:
     st.divider()
     ceps_raw = []
     for i in range(5):
-        c = st.text_input(f"Ponto {i+1}", key=f"c_v13_{i}", placeholder="Digite o CEP")
+        c = st.text_input(f"Ponto {i+1}", key=f"c_v131_{i}", placeholder="Digite o CEP")
         if c: ceps_raw.append(c)
-    btn_calc = st.button("🚀 GERAR ROTA PROFISSIONAL", use_container_width=True, type="primary")
+    btn_calc = st.button("🚀 GERAR ROTA", use_container_width=True, type="primary")
 
-# --- 5. LÓGICA DE PROCESSAMENTO V13.0 (IA + ISOLAMENTO) ---
+# --- 5. LÓGICA DE PROCESSAMENTO V13.1 ---
 if btn_calc and ceps_raw:
     with st.spinner("IA calculando a melhor logística..."):
         pts_gps = []
@@ -76,32 +76,39 @@ if btn_calc and ceps_raw:
             st.error("Nenhum CEP válido encontrado."); st.stop()
 
         try:
-            # FASE 1: DESCOBRIR A ORDEM ÓTIMA (IA TSP)
+            # FASE 1: DESCOBRIR A ORDEM ÓTIMA
             if modo == "Otimizar para Menor Caminho":
-                coords_ia = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
+                # MANDAMOS APENAS: [BASE] + [DESTINOS] (Sem repetir a base no fim aqui)
+                coords_ia = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps]
+                
                 res_ia = ors_client.directions(
                     coordinates=coords_ia,
                     profile='driving-car',
                     optimize_waypoints=True
                 )
-                ordem_ia = res_ia['metadata']['query']['waypoint_order']
-                pts_ordenados = [pts_gps[i] for i in ordem_ia]
+                
+                # O ORS retorna a ordem dos pontos intermediários. 
+                # Se houver erro de waypoint_order, ele usará a ordem original.
+                if 'waypoint_order' in res_ia['metadata']['query']:
+                    ordem_ia = res_ia['metadata']['query']['waypoint_order']
+                    pts_ordenados = [pts_gps[i] for i in ordem_ia]
+                else:
+                    pts_ordenados = pts_gps
             else:
                 pts_ordenados = pts_gps
 
-            # FASE 2: CÁLCULO INDIVIDUAL DE CADA TRECHO (ISOLAMENTO TOTAL)
+            # FASE 2: CÁLCULO INDIVIDUAL (ISOLAMENTO ANTI-CONTAMINAÇÃO)
             itinerario = []
             geometria_total = []
             km_total = 0
             percurso = [u_base] + pts_ordenados + [u_base]
             
-            # Linha de Saída
             itinerario.append({"Seq": "Saída", "Destino": u_base['endereco'], "Distancia": "0.0 km", "Tempo": "0 min", "lat": u_base['lat'], "lon": u_base['lon']})
 
             for i in range(len(percurso) - 1):
                 origem, destino = percurso[i], percurso[i+1]
                 
-                # Chamada isolada para este trecho específico
+                # Chamada isolada trecho a trecho
                 trecho = ors_client.directions(
                     coordinates=[[origem['lon'], origem['lat']], [destino['lon'], destino['lat']]],
                     profile='driving-car', format='geojson'
@@ -123,30 +130,29 @@ if btn_calc and ceps_raw:
                     "lat": destino['lat'], "lon": destino['lon']
                 })
 
-            st.session_state.v13 = {"tabela": itinerario, "mapa": geometria_total, "total": round(km_total, 2)}
+            st.session_state.v131 = {"tabela": itinerario, "mapa": geometria_total, "total": round(km_total, 2)}
         except Exception as e:
             st.error(f"Erro na roteirização: {e}")
 
 # --- 6. EXIBIÇÃO ---
-if "v13" in st.session_state:
-    r = st.session_state.v13
+if "v131" in st.session_state:
+    r = st.session_state.v131
     st.subheader(f"📊 Relatório Final: {r['total']} km")
     
     col_t, col_m = st.columns([1, 1.3])
     with col_t:
         st.dataframe(pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
         pdf_data = gerar_pdf(r['tabela'], r['total'])
-        st.download_button("📥 Baixar PDF", data=pdf_data, file_name="itinerario_tecnolab.pdf", mime="application/pdf")
+        st.download_button("📥 Baixar PDF", data=pdf_data, file_name="itinerario.pdf", mime="application/pdf")
 
     with col_m:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        folium.PolyLine(r['mapa'], color="#2E86C1", weight=6, opacity=0.8).add_to(m)
+        folium.PolyLine(r['mapa'], color="#2E86C1", weight=6).add_to(m)
         for i in r['tabela']:
             is_base = i['Seq'] in ['Saída', 'Retorno']
             folium.Marker(
                 [i['lat'], i['lon']], 
                 tooltip=i['Seq'], 
-                icon=folium.Icon(color='green' if is_base else 'blue', icon='home' if is_base else 'info-sign'),
-                popup=f"<b>{i['Seq']}</b><br>{i['Destino']}"
+                icon=folium.Icon(color='green' if is_base else 'blue')
             ).add_to(m)
         st_folium(m, use_container_width=True, height=500)
