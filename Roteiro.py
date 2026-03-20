@@ -1,119 +1,71 @@
-import streamlit as st
-import pandas as pd
-import requests
-import openrouteservice
-from openrouteservice import client
-import folium
-from streamlit_folium import st_folium
-from fpdf import FPDF
-
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V11.2", layout="wide", page_icon="🚚")
-
-# --- 2. FUNÇÕES ---
-@st.cache_data(show_spinner=False)
-def get_coords_cep(cep, _ors_client):
-    try:
-        clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
-        r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
-        if "erro" in r: return None
-        
-        logra = f"{r.get('logradouro')}, {r.get('bairro')}"
-        query = f"{logra}, {r.get('localidade')}, {clean_cep}, Brasil"
-
-        geo = _ors_client.pelias_search(text=query, size=1)
-        if geo and len(geo['features']) > 0:
-            c = geo['features'][0]['geometry']['coordinates']
-            return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": clean_cep}
-    except: return None
-
-def gerar_pdf(dados, dist_total):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(190, 10, "ITINERARIO TECNOLAB - CONTROLE DE KM", ln=True, align="C")
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(190, 10, f"Distancia Total do Percurso: {dist_total} km", ln=True, align="C")
-    pdf.ln(5)
-    # Tabela
-    pdf.set_font("Arial", "B", 9)
-    pdf.cell(20, 10, "Seq", 1); pdf.cell(110, 10, "Local", 1); pdf.cell(30, 10, "Km Trecho", 1); pdf.cell(30, 10, "Tempo", 1, 1)
-    pdf.set_font("Arial", "", 8)
-    for i in dados:
-        pdf.cell(20, 8, str(i['Seq']), 1)
-        pdf.cell(110, 8, str(i['Destino'])[:60], 1)
-        pdf.cell(30, 8, str(i['Distancia']), 1)
-        pdf.cell(30, 8, str(i['Tempo']), 1, 1)
-    return pdf.output(dest='S').encode('latin-1', 'ignore')
-
-# --- 3. SETUP ---
-try:
-    ors_client = client.Client(key=st.secrets["ORS_KEY"])
-except:
-    st.error("Erro na API Key."); st.stop()
-
-u_base = {"nome": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594}
-
-# --- 4. INTERFACE ---
-with st.sidebar:
-    st.header("🚚 Configuração")
-    modo = st.radio("Logística:", ["Ordem Digitada", "Otimizar Caminho (IA)"])
-    st.divider()
-    ceps = []
-    for i in range(5):
-        c = st.text_input(f"CEP {i+1}", key=f"c_{i}")
-        if c: ceps.append(c)
-    btn = st.button("🚀 GERAR ROTA", use_container_width=True, type="primary")
-
-# --- 5. PROCESSAMENTO ---
+# --- 5. LÓGICA DE CÁLCULO (VERSÃO CORRIGIDA V11.3) ---
 if btn and ceps:
-    with st.spinner("Calculando distâncias reais..."):
+    with st.spinner("Sincronizando distâncias reais..."):
         pts_gps = []
         for c in ceps:
             res = get_coords_cep(c, ors_client)
             if res: pts_gps.append(res)
         
         if not pts_gps:
-            st.error("CEPs inválidos."); st.stop()
+            st.error("Nenhum CEP válido encontrado."); st.stop()
 
         try:
-            # Montagem das coordenadas
-            coords = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
+            # 1. Definir a ordem de chamada das coordenadas
+            # Sempre: [MATRIZ, PONTOS..., MATRIZ]
+            coords_chamada = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
             
             otimizar = (modo == "Otimizar Caminho (IA)")
-            res_api = ors_client.directions(coordinates=coords, profile='driving-car', format='geojson', optimize_waypoints=otimizar)
+            res_api = ors_client.directions(
+                coordinates=coords_chamada, 
+                profile='driving-car', 
+                format='geojson', 
+                optimize_waypoints=otimizar
+            )
 
-            # Sincronização da Ordem
+            # 2. SEGREDO: Descobrir a ordem REAL que a API usou
             if otimizar and 'waypoint_order' in res_api['metadata']['query']:
-                ordem = res_api['metadata']['query']['waypoint_order']
-                pts_finais = [pts_gps[i] for i in ordem]
+                ordem_ia = res_api['metadata']['query']['waypoint_order']
+                # Reorganiza nossa lista de objetos conforme a IA decidiu
+                pts_ordenados = [pts_gps[i] for i in ordem_ia]
             else:
-                pts_finais = pts_gps
+                # Mantém a ordem exata da digitação
+                pts_ordenados = pts_gps
 
-            # Montagem da Tabela com KM por Trecho
+            # 3. Montar o itinerário garantindo que a distância i é para chegar no ponto i
             itinerario = []
             segs = res_api['features'][0]['properties']['segments']
             
-            # 1. Saída
-            itinerario.append({"Seq": "Saída", "Destino": u_base['nome'], "Distancia": "0.0 km", "Tempo": "0 min", "lat": u_base['lat'], "lon": u_base['lon']})
+            # Linha da Saída (sempre zero)
+            itinerario.append({
+                "Seq": "Saída", 
+                "Destino": u_base['nome'], 
+                "Distancia": "0.0 km", 
+                "Tempo": "0 min", 
+                "lat": u_base['lat'], "lon": u_base['lon']
+            })
             
-            # 2. Trechos intermediários
-            for i, p in enumerate(pts_finais):
-                dist_km = round(segs[i]['distance'] / 1000, 2)
-                tempo_min = round(segs[i]['duration'] / 60, 1)
+            # Loop pelos pontos ordenados
+            # O segmento[i] é SEMPRE o trajeto para chegar no pts_ordenados[i]
+            for i, p in enumerate(pts_ordenados):
+                dist_trecho = round(segs[i]['distance'] / 1000, 2)
+                tempo_trecho = round(segs[i]['duration'] / 60, 1)
                 itinerario.append({
                     "Seq": f"{i+1}º",
                     "Destino": f"{p['endereco']} ({p['cep']})",
-                    "Distancia": f"{dist_km} km",
-                    "Tempo": f"{tempo_min} min",
+                    "Distancia": f"{dist_trecho} km",
+                    "Tempo": f"{tempo_trecho} min",
                     "lat": p['lat'], "lon": p['lon']
                 })
             
-            # 3. Retorno Final (Do último ponto para a Matriz)
-            dist_ret = round(segs[-1]['distance'] / 1000, 2)
-            tempo_ret = round(segs[-1]['duration'] / 60, 1)
+            # Linha do Retorno (o último segmento da lista)
+            dist_retorno = round(segs[-1]['distance'] / 1000, 2)
+            tempo_retorno = round(segs[-1]['duration'] / 60, 1)
             itinerario.append({
-                "Seq": "Retorno", "Destino": u_base['nome'], "Distancia": f"{dist_ret} km", "Tempo": f"{tempo_ret} min", "lat": u_base['lat'], "lon": u_base['lon']
+                "Seq": "Retorno", 
+                "Destino": u_base['nome'], 
+                "Distancia": f"{dist_retorno} km", 
+                "Tempo": f"{tempo_retorno} min", 
+                "lat": u_base['lat'], "lon": u_base['lon']
             })
 
             st.session_state.v112 = {
@@ -122,23 +74,4 @@ if btn and ceps:
                 "total": round(res_api['features'][0]['properties']['summary']['distance']/1000, 2)
             }
         except Exception as e:
-            st.error(f"Erro: {e}")
-
-# --- 6. DISPLAY ---
-if "v112" in st.session_state:
-    r = st.session_state.v112
-    st.subheader(f"Total da Rota: {r['total']} km")
-    
-    col1, col2 = st.columns([1, 1.2])
-    with col1:
-        st.dataframe(pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
-        pdf = gerar_pdf(r['tabela'], r['total'])
-        st.download_button("📥 Exportar Itinerário", data=pdf, file_name="rota.pdf", mime="application/pdf")
-
-    with col2:
-        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        folium.PolyLine(r['mapa'], color="blue", weight=5).add_to(m)
-        for i in r['tabela']:
-            is_b = i['Seq'] in ['Saída', 'Retorno']
-            folium.Marker([i['lat'], i['lon']], tooltip=i['Seq'], icon=folium.Icon(color='green' if is_b else 'red')).add_to(m)
-        st_folium(m, use_container_width=True, height=500)
+            st.error(f"Erro crítico de processamento: {e}")
