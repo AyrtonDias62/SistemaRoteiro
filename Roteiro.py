@@ -7,60 +7,54 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V14.6", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V14.7", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS (RESOLVIDO) ---
+# --- 2. FUNÇÃO DE COORDENADAS (V3 - ESTABILIZADA) ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
-        # 1. Limpeza e Consulta via ViaCEP
+        # 1. Busca dados oficiais no ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
+        
         if "erro" in r: 
             return None
-        
-        # 2. Monta query simplificada (Logradouro + Cidade + SP)
-        # CEP no texto as vezes confunde o buscador Pelias; cidade e estado são mais estáveis.
+            
+        # 2. Monta o endereço simplificado (evita confusão com nomes de ruas idênticos)
+        # Usamos Logradouro + Cidade + Estado
         query = f"{r.get('logradouro')}, {r.get('localidade')}, SP"
         
-        # 3. Busca Restrita (Retângulo Grande SP e Litoral)
-        # rect_min_x: longitude oeste | rect_min_y: latitude sul
-        # rect_max_x: longitude leste | rect_max_y: latitude norte
+        # 3. Busca no ORS priorizando a proximidade da Matriz (focus_point)
+        # Em vez de um retângulo rígido que pode bloquear o CEP, usamos o focus_point
+        # Isso "puxa" a busca para SP, ignorando cidades como Panorama automaticamente.
         geo = _ors_client.pelias_search(
-            text=query, 
-            size=1,
-            rect_min_x=-47.50, # Longitude Oeste (Sorocaba)
-            rect_min_y=-24.50, # Latitude Sul (Litoral Sul)
-            rect_max_x=-45.50, # Longitude Leste (Vale do Paraíba)
-            rect_max_y=-23.00  # Latitude Norte (Jundiaí)
-        )
-        
-        # 4. Processamento do Resultado
-        if geo and len(geo['features']) > 0:
-            c = geo['features'][0]['geometry']['coordinates']
-            return {
-                "lat": c[1], 
-                "lon": c[0], 
-                "endereco": f"{r.get('logradouro')}, {r.get('bairro')}", 
-                "cep": clean_cep
-            }
-        
-        # 5. Backup (Focus Point): Se o retângulo falhar, busca perto da Matriz
-        geo_bkp = _ors_client.pelias_search(
             text=query,
             size=1,
-            focus_point=[-46.5594, -23.6912] # Coordenadas Matriz SBC
+            focus_point=[-46.5594, -23.6912] # Coordenadas da Matriz SBC
         )
-        if geo_bkp and len(geo_bkp['features']) > 0:
-            c = geo_bkp['features'][0]['geometry']['coordinates']
+        
+        if geo and len(geo['features']) > 0:
+            c = geo['features'][0]['geometry']['coordinates']
+            lat_f, lon_f = c[1], c[0]
+            
+            # 4. Trava de segurança contra "Deriva"
+            # Se o resultado estiver a mais de 150km da matriz, ignoramos (evita Panorama)
+            # Matriz: -23.69, -46.55 | Panorama: -21.35, -51.85 (Distância > 600km)
+            dist_seguranca = ((lat_f - (-23.6912))**2 + (lon_f - (-46.5594))**2)**0.5
+            
+            if dist_seguranca > 1.5: # Aproximadamente 160km de raio
+                return None
+                
             return {
-                "lat": c[1], "lon": c[0], 
+                "lat": lat_f, 
+                "lon": lon_f, 
                 "endereco": f"{r.get('logradouro')}, {r.get('bairro')}", 
                 "cep": clean_cep
             }
             
-    except Exception as e:
+    except: 
         return None
+
 
 # --- 3. SETUP API ---
 try:
