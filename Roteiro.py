@@ -7,7 +7,7 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V14.3", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V14.4", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÃO DE COORDENADAS (AJUSTE DE PRECISÃO) ---
 @st.cache_data(show_spinner=False)
