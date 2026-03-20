@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 from fpdf import FPDF
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V12.0", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V12.1", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÕES ---
 @st.cache_data(show_spinner=False)
@@ -36,18 +36,17 @@ u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep
 # --- 4. INTERFACE ---
 with st.sidebar:
     st.header("🚚 Painel Tecnolab")
-    modo = st.radio("Logística:", ["Ordem da Lista", "Menor Caminho (IA)"], 
-                    help="O 'Menor Caminho' vai embaralhar os CEPs para economizar gasolina.")
+    modo = st.radio("Configuração da Rota:", ["Ordem da Lista", "Menor Caminho (IA)"])
     st.divider()
     ceps_raw = []
     for i in range(5):
-        c = st.text_input(f"Ponto {i+1}", key=f"c_v12_{i}")
+        c = st.text_input(f"Ponto {i+1}", key=f"c_v121_{i}")
         if c: ceps_raw.append(c)
-    btn_calc = st.button("🚀 CALCULAR ROTA", use_container_width=True, type="primary")
+    btn_calc = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
 
 # --- 5. LÓGICA DE PROCESSAMENTO ---
 if btn_calc and ceps_raw:
-    with st.spinner("Otimizando e calculando trechos..."):
+    with st.spinner("Analisando melhor trajeto..."):
         pts_gps = []
         for c in ceps_raw:
             res = get_coords_cep(c, ors_client)
@@ -57,75 +56,94 @@ if btn_calc and ceps_raw:
             st.error("Nenhum CEP válido."); st.stop()
 
         try:
-            # --- PASSO 1: DESCOBRIR A MELHOR ORDEM ---
+            # --- PASSO 1: DETERMINAR A ORDEM ---
             pts_ordenados = []
+            
             if modo == "Menor Caminho (IA)":
-                coords_otimizar = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
-                res_otimizacao = ors_client.directions(
-                    coordinates=coords_otimizar,
+                # Criamos a lista de coordenadas para a API Otimizar
+                # Importante: A API de directions espera [lon, lat]
+                coords_ia = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
+                
+                # Chamada de otimização
+                res_ia = ors_client.directions(
+                    coordinates=coords_ia,
                     profile='driving-car',
-                    optimize_waypoints=True # Aqui a IA trabalha
+                    optimize_waypoints=True # Ativa o algoritmo do caixeiro viajante
                 )
-                # A API retorna waypoint_order, ex: [1, 0] para dizer que o 2º CEP inserido deve ser o 1º a ser visitado
-                ordem_indices = res_otimizacao['metadata']['query']['waypoint_order']
+                
+                # O waypoint_order indica a nova posição dos pontos intermediários
+                # Se digitou A, B e a IA diz [1, 0], a nova ordem é B, A.
+                ordem_indices = res_ia['metadata']['query']['waypoint_order']
                 pts_ordenados = [pts_gps[i] for i in ordem_indices]
             else:
+                # Mantém exatamente a ordem digitada nos inputs
                 pts_ordenados = pts_gps
 
-            # --- PASSO 2: CALCULAR PERNA POR PERNA (Para garantir os KMs reais) ---
+            # --- PASSO 2: CÁLCULO REAL POR PERNAS ---
             itinerario = []
-            geometria_completa = []
-            dist_total = 0
+            geometria_plot = []
+            dist_total_km = 0
             
-            # Adicionar Saída
+            # Lista final do percurso: Base -> Pontos -> Base
+            percurso_final = [u_base] + pts_ordenados + [u_base]
+            
             itinerario.append({"Seq": "Saída", "Destino": u_base['endereco'], "Distancia": "0.0 km", "Tempo": "0 min", "lat": u_base['lat'], "lon": u_base['lon']})
-            
-            percurso = [u_base] + pts_ordenados + [u_base]
-            
-            for i in range(len(percurso) - 1):
-                p_ini, p_fim = percurso[i], percurso[i+1]
+
+            for i in range(len(percurso_final) - 1):
+                p_inicio = percurso_final[i]
+                p_destino = percurso_final[i+1]
                 
+                # Cálculo do trecho individual
                 trecho = ors_client.directions(
-                    coordinates=[[p_ini['lon'], p_ini['lat']], [p_fim['lon'], p_fim['lat']]],
+                    coordinates=[[p_inicio['lon'], p_inicio['lat']], [p_destino['lon'], p_destino['lat']]],
                     profile='driving-car', format='geojson'
                 )
                 
-                info = trecho['features'][0]['properties']['summary']
-                d_km = round(info['distance'] / 1000, 2)
-                t_min = round(info['duration'] / 60, 1)
-                dist_total += d_km
+                summary = trecho['features'][0]['properties']['summary']
+                dist_segmento = round(summary['distance'] / 1000, 2)
+                tempo_segmento = round(summary['duration'] / 60, 1)
+                dist_total_km += dist_segmento
                 
-                geometria_completa.extend([[c[1], c[0]] for c in trecho['features'][0]['geometry']['coordinates']])
+                # Geometria para o mapa
+                geometria_plot.extend([[c[1], c[0]] for c in trecho['features'][0]['geometry']['coordinates']])
                 
-                label = "Retorno" if i == len(percurso) - 2 else f"{i+1}º"
+                # Label da tabela
+                label = "Retorno" if i == len(percurso_final) - 2 else f"{i+1}º"
+                
                 itinerario.append({
                     "Seq": label,
-                    "Destino": f"{p_fim['endereco']} ({p_fim['cep']})",
-                    "Distancia": f"{d_km} km",
-                    "Tempo": f"{t_min} min",
-                    "lat": p_fim['lat'], "lon": p_fim['lon']
+                    "Destino": f"{p_destino['endereco']} ({p_destino['cep']})",
+                    "Distancia": f"{dist_segmento} km",
+                    "Tempo": f"{tempo_segmento} min",
+                    "lat": p_destino['lat'], "lon": p_destino['lon']
                 })
 
-            st.session_state.v12 = {
+            st.session_state.v121 = {
                 "tabela": itinerario,
-                "mapa": geometria_completa,
-                "total": round(dist_total, 2)
+                "mapa": geometria_plot,
+                "total": round(dist_total_km, 2),
+                "modo_usado": modo
             }
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro no cálculo: {e}")
 
 # --- 6. EXIBIÇÃO ---
-if "v12" in st.session_state:
-    r = st.session_state.v119 if "v119" in st.session_state and False else st.session_state.v12
-    st.success(f"Caminho calculado: {r['total']} km total.")
+if "v121" in st.session_state:
+    res = st.session_state.v121
+    st.info(f"Modo: **{res['modo_usado']}** | Distância Total: **{res['total']} km**")
     
-    col1, col2 = st.columns([1, 1.3])
-    with col1:
-        st.dataframe(pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
-    with col2:
+    c_tabela, c_mapa = st.columns([1, 1.2])
+    with c_tabela:
+        st.dataframe(pd.DataFrame(res['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
+        
+    with c_mapa:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        folium.PolyLine(r['mapa'], color="#2E86C1", weight=5).add_to(m)
-        for i in r['tabela']:
+        folium.PolyLine(res['mapa'], color="blue", weight=5, opacity=0.8).add_to(m)
+        for i in res['tabela']:
             base = i['Seq'] in ['Saída', 'Retorno']
-            folium.Marker([i['lat'], i['lon']], tooltip=i['Seq'], icon=folium.Icon(color='green' if base else 'blue')).add_to(m)
+            folium.Marker(
+                [i['lat'], i['lon']], 
+                tooltip=f"{i['Seq']}", 
+                icon=folium.Icon(color='green' if base else 'blue', icon='home' if base else 'info-sign')
+            ).add_to(m)
         st_folium(m, use_container_width=True, height=500)
