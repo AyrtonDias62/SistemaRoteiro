@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 from fpdf import FPDF
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V11.7", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V11.8", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÕES ---
 @st.cache_data(show_spinner=False)
@@ -37,8 +37,7 @@ def gerar_pdf(dados, dist_total):
     pdf.cell(20, 10, "Seq", 1); pdf.cell(110, 10, "Local", 1); pdf.cell(30, 10, "Km Trecho", 1); pdf.cell(30, 10, "Tempo", 1, 1)
     pdf.set_font("Arial", "", 8)
     for i in dados:
-        try:
-            dest = i['Destino'].encode('latin-1', 'replace').decode('latin-1')
+        try: dest = i['Destino'].encode('latin-1', 'replace').decode('latin-1')
         except: dest = "Endereco"
         pdf.cell(20, 8, str(i['Seq']), 1)
         pdf.cell(110, 8, dest[:60], 1)
@@ -61,13 +60,13 @@ with st.sidebar:
     st.divider()
     ceps_raw = []
     for i in range(5):
-        c = st.text_input(f"Ponto {i+1}", key=f"c_v117_{i}")
+        c = st.text_input(f"Ponto {i+1}", key=f"c_v118_{i}")
         if c: ceps_raw.append(c)
     btn_calc = st.button("🚀 CALCULAR ROTA", use_container_width=True, type="primary")
 
-# --- 5. LÓGICA DE PROCESSAMENTO ---
+# --- 5. LÓGICA DE PROCESSAMENTO (CHAMADAS INDIVIDUAIS POR TRECHO) ---
 if btn_calc and ceps_raw:
-    with st.spinner("Sincronizando trechos..."):
+    with st.spinner("Calculando trechos individuais para precisão total..."):
         pts_gps = []
         for c in ceps_raw:
             res = get_coords_cep(c, ors_client)
@@ -77,66 +76,69 @@ if btn_calc and ceps_raw:
             st.error("Nenhum CEP válido."); st.stop()
 
         try:
-            # 1. Coordenadas iniciais
-            coords_full = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
-            otimizar = (modo == "Menor Caminho (IA)")
-            
-            res_api = ors_client.directions(
-                coordinates=coords_full,
-                profile='driving-car',
-                format='geojson',
-                optimize_waypoints=otimizar
-            )
-
-            # 2. SEGREDO: Descobrir qual ponto é qual após a otimização
-            # A API retorna waypoint_order: [1, 0] significa que o Ponto 2 foi visitado antes do Ponto 1.
-            if otimizar and 'waypoint_order' in res_api['metadata']['query']:
-                ordem_real = res_api['metadata']['query']['waypoint_order']
-                pts_ordenados = [pts_gps[i] for i in ordem_real]
+            # 1. Definir a ordem dos pontos
+            if modo == "Menor Caminho (IA)":
+                # Fazemos uma chamada rápida apenas para descobrir a melhor ordem
+                coords_otimizar = [[u_base['lon'], u_base['lat']]] + [[p['lon'], p['lat']] for p in pts_gps] + [[u_base['lon'], u_base['lat']]]
+                res_ia = ors_client.directions(coordinates=coords_otimizar, profile='driving-car', optimize_waypoints=True)
+                ordem = res_ia['metadata']['query']['waypoint_order']
+                pts_ordenados = [pts_gps[i] for i in ordem]
             else:
                 pts_ordenados = pts_gps
 
-            # 3. Montar Itinerário usando a ordem que REALMENTE está no mapa
+            # 2. CONSTRUÇÃO DA ROTA PERNA POR PERNA (Garante o fim dos 8km)
             itinerario = []
-            segs = res_api['features'][0]['properties']['segments']
+            geometria_completa = []
+            dist_total_acumulada = 0
             
-            # Saída
+            # Ponto de Partida
             itinerario.append({"Seq": "Saída", "Destino": u_base['nome'], "Distancia": "0.0 km", "Tempo": "0 min", "lat": u_base['lat'], "lon": u_base['lon']})
             
-            # Paradas intermediárias (cada segs[i] leva ao pts_ordenados[i])
-            for i, p in enumerate(pts_ordenados):
-                d_km = round(segs[i]['distance'] / 1000, 2)
-                t_min = round(segs[i]['duration'] / 60, 1)
-                itinerario.append({
-                    "Seq": f"{i+1}º",
-                    "Destino": f"{p['endereco']} ({p['cep']})",
-                    "Distancia": f"{d_km} km",
-                    "Tempo": f"{t_min} min",
-                    "lat": p['lat'], "lon": p['lon']
-                })
+            # Criar lista de todos os pontos do percurso: [BASE, P1, P2..., BASE]
+            percurso_completo = [u_base] + pts_ordenados + [u_base]
             
-            # Retorno (Último segmento da API: do último ponto de volta à Matriz)
-            d_ret = round(segs[-1]['distance'] / 1000, 2)
-            t_ret = round(segs[-1]['duration'] / 60, 1)
-            itinerario.append({
-                "Seq": "Retorno", 
-                "Destino": u_base['nome'], 
-                "Distancia": f"{d_ret} km", 
-                "Tempo": f"{t_ret} min",
-                "lat": u_base['lat'], "lon": u_base['lon']
-            })
+            for i in range(len(percurso_completo) - 1):
+                p_origem = percurso_completo[i]
+                p_destino = percurso_completo[i+1]
+                
+                # Chamada para o trecho específico
+                trecho = ors_client.directions(
+                    coordinates=[[p_origem['lon'], p_origem['lat']], [p_destino['lon'], p_destino['lat']]],
+                    profile='driving-car', format='geojson'
+                )
+                
+                prop = trecho['features'][0]['properties']['summary']
+                dist_trecho = round(prop['distance'] / 1000, 2)
+                tempo_trecho = round(prop['duration'] / 60, 1)
+                dist_total_acumulada += dist_trecho
+                
+                # Adiciona geometria ao mapa
+                coords_trecho = [[c[1], c[0]] for c in trecho['features'][0]['geometry']['coordinates']]
+                geometria_completa.extend(coords_trecho)
+                
+                # Preenche a tabela (pula o índice 0 pois já adicionamos a Saída)
+                seq_label = "Retorno" if i == len(percurso_completo) - 2 else f"{i+1}º"
+                
+                # Só adicionamos ao itinerário o destino alcançado
+                itinerario.append({
+                    "Seq": seq_label,
+                    "Destino": f"{p_destino.get('endereco', p_destino['nome'])} ({p_destino.get('cep', '')})".strip(),
+                    "Distancia": f"{dist_trecho} km",
+                    "Tempo": f"{tempo_trecho} min",
+                    "lat": p_destino['lat'], "lon": p_destino['lon']
+                })
 
-            st.session_state.v117 = {
+            st.session_state.v118 = {
                 "tabela": itinerario,
-                "mapa": [[c[1], c[0]] for c in res_api['features'][0]['geometry']['coordinates']],
-                "total": round(res_api['features'][0]['properties']['summary']['distance']/1000, 2)
+                "mapa": geometria_completa,
+                "total": round(dist_total_acumulada, 2)
             }
         except Exception as e:
             st.error(f"Erro no cálculo: {e}")
 
 # --- 6. EXIBIÇÃO ---
-if "v117" in st.session_state:
-    r = st.session_state.v117
+if "v118" in st.session_state:
+    r = st.session_state.v118
     st.subheader(f"Resumo da Rota: {r['total']} km")
     
     col1, col2 = st.columns([1, 1.3])
@@ -147,13 +149,12 @@ if "v117" in st.session_state:
 
     with col2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        folium.PolyLine(r['mapa'], color="blue", weight=5, opacity=0.7).add_to(m)
+        folium.PolyLine(r['mapa'], color="blue", weight=5).add_to(m)
         for i in r['tabela']:
             base = i['Seq'] in ['Saída', 'Retorno']
             folium.Marker(
                 [i['lat'], i['lon']], 
-                tooltip=f"{i['Seq']}", 
-                popup=f"<b>{i['Seq']}</b>: {i['Destino']}",
+                tooltip=i['Seq'], 
                 icon=folium.Icon(color='green' if base else 'blue', icon='home' if base else 'info-sign')
             ).add_to(m)
         st_folium(m, use_container_width=True, height=500)
