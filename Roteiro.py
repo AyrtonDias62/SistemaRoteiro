@@ -16,9 +16,17 @@ def get_coords_cep(cep, _ors_client):
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
+            
         logra = f"{r.get('logradouro')}, {r.get('bairro')}"
         query = f"{logra}, {r.get('localidade')}, {clean_cep}, Brasil"
-        geo = _ors_client.pelias_search(text=query, size=1)
+        
+        # Definição do retângulo: [min_lon, min_lat, max_lon, max_lat]
+        # Abrange Grande SP e Baixada Santista, impedindo "saltos" para o interior (ex: Panorama)
+        cerca_geografica = {
+            "min_lon": -47.50, "min_lat": -24.50, 
+            "max_lon": -45.50, "max_lat": -23.00
+        }
+        geo = _ors_client.pelias_search(text=query, size=1,boundary_rect=cerca_geografica ) # Restringe a pesquisa a esta área
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
             return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": clean_cep}
