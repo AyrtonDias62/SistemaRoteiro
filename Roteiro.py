@@ -80,7 +80,7 @@ u_base = {"nome": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
 # --- 4. SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Configuração")
+    st.header("⚙️ Roteirizador")
     tipo_calc = st.selectbox("Estratégia de Rota:", ["Melhor Caminho (IA)", "Ordem da Lista"])
     
     st.divider()
