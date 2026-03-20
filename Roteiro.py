@@ -9,20 +9,53 @@ from streamlit_folium import st_folium
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Roteirizador Tecnolab V14.3", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS ---
+# --- 2. FUNÇÃO DE COORDENADAS (AJUSTE DE PRECISÃO) ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
+        # 1. Consulta oficial via ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
-        r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
+        r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
         if "erro" in r: return None
+        
+        # 2. Monta o endereço vindo do ViaCEP
         logra = f"{r.get('logradouro')}, {r.get('bairro')}"
-        query = f"{logra}, {r.get('localidade')}, {clean_cep}, Brasil"
-        geo = _ors_client.pelias_search(text=query, size=1)
+        query = f"{logra}, {r.get('localidade')}, SP, Brasil"
+        
+        # 3. Busca no ORS com Bounding Box (Retângulo de Segurança)
+        # Limitamos a busca entre Jundiaí, Vale do Paraíba e Litoral Sul.
+        # Isso impede que o GPS "viaje" 700km até Panorama.
+        geo = _ors_client.pelias_search(
+            text=query, 
+            size=1,
+            rect_min_x=-47.50, # Longitude Oeste
+            rect_min_y=-24.60, # Latitude Sul
+            rect_max_x=-45.40, # Longitude Leste
+            rect_max_y=-23.00  # Latitude Norte
+        )
+        
         if geo and len(geo['features']) > 0:
-            c = geo['features'][0]['geometry']['coordinates']
+            # Captura correta das coordenadas do GeoJSON
+            coords = geo['features'][0]['geometry']['coordinates']
+            return {
+                "lat": coords[1], 
+                "lon": coords[0], 
+                "endereco": logra, 
+                "cep": clean_cep
+            }
+            
+        # Caso o retângulo falhe, tentamos busca simples focada na Matriz
+        geo_fallback = _ors_client.pelias_search(
+            text=query, 
+            size=1, 
+            focus_point=[-46.5594, -23.6912]
+        )
+        if geo_fallback and len(geo_fallback['features']) > 0:
+            c = geo_fallback['features'][0]['geometry']['coordinates']
             return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": clean_cep}
-    except: return None
+
+    except Exception:
+        return None
 
 # --- 3. SETUP API ---
 try:
