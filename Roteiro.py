@@ -7,58 +7,22 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V14.9", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V14.3", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO CORRIGIDA - TESTADA PARA 09781-220) ---
+# --- 2. FUNÇÃO DE COORDENADAS ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
-        # 1. Limpa o CEP e consulta ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
-        r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
-        
-        if "erro" in r or not r: 
-            return None
-            
-        # 2. Monta query de busca (Rua, Cidade, SP)
-        logradouro = r.get('logradouro')
-        cidade = r.get('localidade')
-        bairro = r.get('bairro')
-        query = f"{logradouro}, {cidade}, SP"
-        
-        # 3. Busca no ORS com foco geográfico para evitar Panorama
-        geo = _ors_client.pelias_search(
-            text=query,
-            size=1,
-            focus_point=[-46.5594, -23.6912] # SBC Matriz
-        )
-        
-        # 4. VERIFICAÇÃO CRÍTICA DO RETORNO
-        if geo and 'features' in geo and len(geo['features']) > 0:
-            # Pegamos o primeiro resultado [0] e acessamos a geometria
-            feature = geo['features'][0]
-            coords = feature['geometry']['coordinates']
-            
-            lon_f = coords[0] # Longitude
-            lat_f = coords[1] # Latitude
-            
-            # 5. TRAVA ANTI-PANORAMA (Proteção de 100km)
-            # Se lat/lon fugir muito de SBC, descarta.
-            if abs(lat_f - (-23.6912)) > 1.0 or abs(lon_f - (-46.5594)) > 1.0:
-                return None
-                
-            return {
-                "lat": lat_f, 
-                "lon": lon_f, 
-                "endereco": f"{logradouro}, {bairro}", 
-                "cep": clean_cep
-            }
-            
-        return None
-            
-    except Exception as e:
-        # Em caso de erro técnico, não para o script, apenas retorna None
-        return None
+        r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
+        if "erro" in r: return None
+        logra = f"{r.get('logradouro')}, {r.get('bairro')}"
+        query = f"{logra}, {r.get('localidade')}, {clean_cep}, Brasil"
+        geo = _ors_client.pelias_search(text=query, size=1)
+        if geo and len(geo['features']) > 0:
+            c = geo['features'][0]['geometry']['coordinates']
+            return {"lat": c[1], "lon": c[0], "endereco": logra, "cep": clean_cep}
+    except: return None
 
 # --- 3. SETUP API ---
 try:
