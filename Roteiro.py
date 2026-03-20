@@ -9,39 +9,41 @@ from streamlit_folium import st_folium
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Roteirizador Tecnolab V14.8", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO FINAL - TESTADA PARA 09781-220) ---
+# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO CORRIGIDA - TESTADA PARA 09781-220) ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
-        # 1. Busca dados no ViaCEP (Fonte oficial de endereços no Brasil)
+        # 1. Limpa o CEP e consulta ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
         
-        if "erro" in r: 
+        if "erro" in r or not r: 
             return None
             
-        # 2. Monta query de busca (Removemos o CEP do texto para não confundir o GPS)
+        # 2. Monta query de busca (Rua, Cidade, SP)
         logradouro = r.get('logradouro')
-        bairro = r.get('bairro')
         cidade = r.get('localidade')
-        # Ex: "Avenida Tiradentes, São Bernardo do Campo, SP"
+        bairro = r.get('bairro')
         query = f"{logradouro}, {cidade}, SP"
         
-        # 3. Busca no ORS com FOCO na Matriz (Sem retângulo rígido que bloqueia)
-        # O focus_point garante que ele busque em SBC e não em Panorama.
+        # 3. Busca no ORS com foco geográfico para evitar Panorama
         geo = _ors_client.pelias_search(
             text=query,
             size=1,
-            focus_point=[-46.5594, -23.6912] # Coordenadas Matriz SBC
+            focus_point=[-46.5594, -23.6912] # SBC Matriz
         )
         
-        if geo and len(geo['features']) > 0:
-            c = geo['features'][0]['geometry']['coordinates']
-            lon_f, lat_f = c[0], c[1]
+        # 4. VERIFICAÇÃO CRÍTICA DO RETORNO
+        if geo and 'features' in geo and len(geo['features']) > 0:
+            # Pegamos o primeiro resultado [0] e acessamos a geometria
+            feature = geo['features'][0]
+            coords = feature['geometry']['coordinates']
             
-            # 4. Trava de Segurança "Anti-Panorama"
-            # Calcula distância simples (delta) para garantir que está na Grande SP
-            # Matriz: -23.69, -46.55 | Se afastar mais de 100km (aprox 1.0 grau), bloqueia.
+            lon_f = coords[0] # Longitude
+            lat_f = coords[1] # Latitude
+            
+            # 5. TRAVA ANTI-PANORAMA (Proteção de 100km)
+            # Se lat/lon fugir muito de SBC, descarta.
             if abs(lat_f - (-23.6912)) > 1.0 or abs(lon_f - (-46.5594)) > 1.0:
                 return None
                 
@@ -52,9 +54,11 @@ def get_coords_cep(cep, _ors_client):
                 "cep": clean_cep
             }
             
-    except Exception as e:
         return None
-
+            
+    except Exception as e:
+        # Em caso de erro técnico, não para o script, apenas retorna None
+        return None
 
 # --- 3. SETUP API ---
 try:
