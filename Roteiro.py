@@ -9,7 +9,7 @@ from fpdf import FPDF
 import io
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V11.0", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V11.1", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÕES AUXILIARES ---
 @st.cache_data(show_spinner=False)
@@ -60,70 +60,71 @@ u_base = {"nome": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 # --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("🚚 Gestão de Rota")
-    # Explicação clara das opções
     tipo_calc = st.radio(
-        "Escolha a lógica:",
-        ["Ordem da Lista (Rígida)", "Melhor Caminho (Otimizado)"],
-        help="A primeira segue sua digitação. A segunda reorganiza para economizar combustível."
+        "Modo de Roteirização:",
+        ["Manter Ordem Digitação", "Otimizar Menor Caminho"],
+        help="O modo Otimizar reorganiza os pontos para reduzir a quilometragem total."
     )
     
     st.divider()
     ceps_raw = []
     for i in range(5):
-        c = st.text_input(f"CEP Destino {i+1}", key=f"c_{i}")
+        c = st.text_input(f"Ponto {i+1}", key=f"c_{i}", placeholder="00000-000")
         if c: ceps_raw.append(c)
     
-    btn_calc = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
+    btn_calc = st.button("🚀 GERAR ROTA", use_container_width=True, type="primary")
 
 # --- 5. LÓGICA DE CÁLCULO ---
 if btn_calc and ceps_raw:
-    with st.spinner("Mapeando pontos..."):
-        pontos_originais = []
+    with st.spinner("Processando..."):
+        pontos_gps = []
         for c in ceps_raw:
             res = get_coords_cep(c, ors_client)
-            if res: pontos_originais.append(res)
+            if res: pontos_gps.append(res)
         
-        if not pontos_originais:
-            st.error("Nenhum CEP válido."); st.stop()
+        if not pontos_gps:
+            st.error("Nenhum CEP válido encontrado."); st.stop()
 
         try:
-            # Montar coordenadas: Início + Pontos + Fim
-            coords = [[u_base['lon'], u_base['lat']]]
-            coords += [[p['lon'], p['lat']] for p in pontos_originais]
-            coords += [[u_base['lon'], u_base['lat']]]
+            # Construir coordenadas para a API
+            # Ordem: [MATRIZ, P1, P2, P3, P4, P5, MATRIZ]
+            coords_chamada = [[u_base['lon'], u_base['lat']]]
+            coords_chamada += [[p['lon'], p['lat']] for p in pontos_gps]
+            coords_chamada += [[u_base['lon'], u_base['lat']]]
 
-            # Chamar API
-            otimizar = (tipo_calc == "Melhor Caminho (Otimizado)")
-            rota_geo = ors_client.directions(
-                coordinates=coords,
+            otimizar_bool = (tipo_calc == "Otimizar Menor Caminho")
+            
+            # Chamada principal da API
+            res_api = ors_client.directions(
+                coordinates=coords_chamada,
                 profile='driving-car',
                 format='geojson',
-                optimize_waypoints=otimizar
+                optimize_waypoints=otimizar_bool
             )
 
-            # --- O SEGREDO DA SINCRONIA ---
-            # Pegamos a ordem que a API usou de fato
-            if otimizar and 'waypoint_order' in rota_geo['metadata']['query']:
-                ordem_ia = rota_geo['metadata']['query']['waypoint_order']
-                # Reorganizamos nossa lista de pontos para bater com o desenho do mapa
-                pontos_finais = [pontos_originais[i] for i in ordem_ia]
+            # EXTRAÇÃO DA ORDEM FINAL
+            # Se otimizado, a API retorna 'waypoint_order' (ex: [1, 0, 2])
+            if otimizar_bool and 'waypoint_order' in res_api['metadata']['query']:
+                ordem_indices = res_api['metadata']['query']['waypoint_order']
+                # Reorganizar os objetos de pontos baseados na decisão da IA
+                pontos_finais = [pontos_gps[i] for i in ordem_indices]
             else:
-                # Mantém a ordem exata da lista digitada
-                pontos_finais = pontos_originais
+                # Mantém a ordem da lista
+                pontos_finais = pontos_gps
 
-            # Montar Itinerário para Tabela e Marcadores
-            itinerario_completo = []
-            segmentos = rota_geo['features'][0]['properties']['segments']
+            # Construção do Itinerário para Tabela e Mapa
+            itinerario = []
+            segmentos = res_api['features'][0]['properties']['segments']
             
-            # 1. Ponto Inicial
-            itinerario_completo.append({
+            # 1. Ponto de Partida
+            itinerario.append({
                 "Seq": "Saída", "Destino": u_base['nome'], "Distancia": "-", "Tempo": "-",
                 "lat": u_base['lat'], "lon": u_base['lon']
             })
 
-            # 2. Pontos Intermediários (na ordem que a rota foi traçada)
+            # 2. Paradas (respeitando a ordem do traçado azul no mapa)
             for i, p in enumerate(pontos_finais):
-                itinerario_completo.append({
+                itinerario.append({
                     "Seq": f"{i+1}º",
                     "Destino": f"{p['endereco']} ({p['cep']})",
                     "Distancia": f"{round(segmentos[i]['distance']/1000, 2)} km",
@@ -132,47 +133,52 @@ if btn_calc and ceps_raw:
                 })
 
             # 3. Retorno
-            itinerario_completo.append({
-                "Seq": "Retorno", "Destino": u_base['nome'], 
-                "Distancia": f"{round(segmentos[-1]['distance']/1000, 2)} km", 
+            itinerario.append({
+                "Seq": "Retorno", "Destino": u_base['nome'],
+                "Distancia": f"{round(segmentos[-1]['distance']/1000, 2)} km",
                 "Tempo": f"{round(segmentos[-1]['duration']/60, 1)} min",
                 "lat": u_base['lat'], "lon": u_base['lon']
             })
 
-            st.session_state.dados_rota = {
-                "tabela": itinerario_completo,
-                "geometria": [[c[1], c[0]] for c in rota_geo['features'][0]['geometry']['coordinates']],
-                "dist_total": round(rota_geo['features'][0]['properties']['summary']['distance']/1000, 2)
+            st.session_state.resultado = {
+                "tabela": itinerario,
+                "geometria": [[c[1], c[0]] for c in res_api['features'][0]['geometry']['coordinates']],
+                "dist_total": round(res_api['features'][0]['properties']['summary']['distance']/1000, 2)
             }
         except Exception as e:
-            st.error(f"Erro no cálculo: {e}")
+            st.error(f"Erro ao calcular: {e}")
 
 # --- 6. EXIBIÇÃO ---
-if "dados_rota" in st.session_state:
-    res = st.session_state.dados_rota
+if "resultado" in st.session_state:
+    res = st.session_state.resultado
     
-    col1, col2 = st.columns([1, 1.3])
+    st.success(f"Cálculo concluído: {res['dist_total']} km total.")
     
-    with col1:
-        st.subheader("📋 Itinerário Detalhado")
-        st.dataframe(pd.DataFrame(res['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
+    col_tab, col_map = st.columns([1, 1.3])
+    
+    with col_tab:
+        st.markdown("### 📋 Itinerário")
+        df_display = pd.DataFrame(res['tabela']).drop(columns=['lat', 'lon'])
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
         
         pdf_bytes = gerar_pdf(res['tabela'], res['dist_total'])
-        st.download_button(label="📥 Baixar Itinerário (PDF)", data=pdf_bytes, file_name="rota_tecnolab.pdf", mime="application/pdf")
+        st.download_button("📥 Baixar Itinerário em PDF", data=pdf_bytes, file_name="itinerario.pdf", mime="application/pdf")
 
-    with col2:
-        st.subheader(f"🗺️ Mapa (Total: {res['dist_total']} km)")
+    with col_map:
+        st.markdown("### 🗺️ Mapa do Percurso")
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
+        
+        # Desenhar a linha azul da rota
         folium.PolyLine(res['geometria'], color="#2E86C1", weight=6, opacity=0.8).add_to(m)
         
-        for item in res['tabela']:
-            is_base = item['Seq'] in ['Saída', 'Retorno']
-            # O número no pop-up e o tooltip agora batem exatamente com a ordem do traçado
+        # Marcadores sincronizados com a tabela
+        for item in res['resultado' if False else 'tabela']:
+            base = item['Seq'] in ['Saída', 'Retorno']
             folium.Marker(
-                location=[item['lat'], item['lon']],
+                [item['lat'], item['lon']],
                 tooltip=f"Parada: {item['Seq']}",
-                popup=folium.Popup(f"<b>Ordem:</b> {item['Seq']}<br><b>Local:</b> {item['Destino']}", max_width=250),
-                icon=folium.Icon(color='green' if is_base else 'blue', icon='info-sign' if not is_base else 'home')
+                popup=f"<b>{item['Seq']}</b><br>{item['Destino']}",
+                icon=folium.Icon(color='green' if base else 'blue', icon='home' if base else 'info-sign')
             ).add_to(m)
-        
-        st_folium(m, use_container_width=True, height=550)
+            
+        st_folium(m, use_container_width=True, height=500)
