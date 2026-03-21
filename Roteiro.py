@@ -13,56 +13,50 @@ st.set_page_config(page_title="Roteirizador Tecnolab V14.4", layout="wide", page
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
-        # 1. Limpeza do CEP
+        # 1. Limpeza e Consulta ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
-        if len(clean_cep) != 8: return None
-        
-        # 2. Consulta ViaCEP
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
 
         logradouro = r.get('logradouro', '')
-        bairro = r.get('bairro', '')
         cidade = r.get('localidade', '')
         
-        # 3. Definição da Cerca Geográfica (Grande SP + ABCD)
-        # O parâmetro boundary_rect na biblioteca Python espera:
-        # { 'min_lon': ..., 'min_lat': ..., 'max_lon': ..., 'max_lat': ... }
-        cerca_sp = {
-            "min_lon": -47.10, "min_lat": -24.00, 
-            "max_lon": -46.10, "max_lat": -23.30
-        }
+        # 2. Configuração do Círculo de Segurança (ABCD + SP)
+        # Centro: Sua Matriz em SBC (-23.6912, -46.5594)
+        # Raio: 50km (cobre todo o ABCDMRR e capital)
+        ponto_central = [-46.5594, -23.6912] 
+        raio_km = 50 
 
-        # --- FUNIL DE BUSCA ---
+        # 3. Funil de Busca
+        # Removendo argumentos nomeados problemáticos e usando a estrutura de filtros
         tentativas = [
             f"{logradouro}, {cidade}, SP",
-            f"{logradouro}, {bairro}, {cidade}",
             f"{clean_cep}, Brasil"
         ]
 
         for texto in tentativas:
-            if not logradouro and "Brasil" not in texto: continue
-            
-            # CORREÇÃO: Usando boundary_rect em vez de rect
+            # Buscamos usando boundary_circle que é amplamente suportado
             geo = _ors_client.pelias_search(
-                text=texto, 
-                size=1, 
-                boundary_rect=cerca_sp  # <--- Nome correto do parâmetro no Python
+                text=texto,
+                size=1,
+                boundary_circle={
+                    "centre": ponto_central,
+                    "radius": raio_km
+                }
             )
             
             if geo and len(geo['features']) > 0:
-                c = geo['features'][0]['geometry']['coordinates']
+                coords = geo['features'][0]['geometry']['coordinates']
                 return {
-                    "lat": c[1], 
-                    "lon": c[0], 
+                    "lat": coords[1], 
+                    "lon": coords[0], 
                     "endereco": f"{logradouro or 'CEP '+clean_cep}, {cidade}", 
                     "cep": clean_cep
                 }
         
         return None
     except Exception as e:
-        # Mostra o erro exato no Streamlit para sabermos o que houve
-        st.error(f"Erro no CEP {cep}: {e}")
+        st.error(f"Erro técnico no CEP {cep}: {e}")
         return None
 
 # --- 3. SETUP API ---
