@@ -9,45 +9,55 @@ from streamlit_folium import st_folium
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Roteirizador Tecnolab V14.4", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO ESTABILIZADA COM TRAVA DE SEGURANÇA) ---
+# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO COM CERCA GEOGRÁFICA RÍGIDA) ---
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
-        r = requests.get(f"https://viacep.com.br{clean_cep}/json/").json()
+        r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
         
         logra = f"{r.get('logradouro')}, {r.get('bairro')}"
-        # Busca original que você sabe que funciona
-        query = f"{logra}, {r.get('localidade')}, {clean_cep}, Brasil"
-        
-        # Adicionamos o focus_point para dar prioridade ao ABC
-        geo = _ors_client.pelias_search(text=query, size=1, focus_point=[-46.5594, -23.6912])
+        query = f"{logra}, {r.get('localidade')}, Brasil"
+
+        # --- CONFIGURAÇÃO DA CERCA GEOGRÁFICA (BOUNDARY RECT) ---
+        # Definimos um retângulo que engloba a Grande SP e o ABC
+        # min_lon, min_lat, max_lon, max_lat
+        cerca_sp = {
+            "min_lon": -47.20, "min_lat": -24.00, 
+            "max_lon": -45.70, "max_lat": -23.20
+        }
+
+        # Realizamos a busca usando o parâmetro boundary_rect
+        geo = _ors_client.pelias_search(
+            text=query, 
+            size=1, 
+            rect=cerca_sp  # <--- TRAVA RÍGIDA AQUI
+        )
         
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
             lat_encontrada, lon_encontrada = c[1], c[0]
             
-            # --- TRAVA ANTI-PANORAMA (Lógica Simples) ---
-            # Coordenadas da Matriz SBC: -23.69, -46.55
-            # Se o ponto estiver a mais de 1.5 graus de distância (aprox. 150km), 
-            # é um erro de "deriva" (Panorama fica a >5 graus de distância).
-            diff_lat = abs(lat_encontrada - (-23.6912))
-            diff_lon = abs(lon_encontrada - (-46.5594))
-            
-            if diff_lat > 1.5 or diff_lon > 1.5:
-                # Se deu "deriva", tentamos uma busca SEM o CEP no texto (mais precisa para o GPS)
-                query_limpa = f"{r.get('logradouro')}, {r.get('localidade')}, SP"
-                geo2 = _ors_client.pelias_search(text=query_limpa, size=1, focus_point=[-46.5594, -23.6912])
-                if geo2 and len(geo2['features']) > 0:
-                    c2 = geo2['features'][0]['geometry']['coordinates']
-                    return {"lat": c2[1], "lon": c2[0], "endereco": logra, "cep": clean_cep}
-                return None # Se ainda assim for longe, ignora para não errar o roteiro
-                
-            return {"lat": lat_encontrada, "lon": lon_encontrada, "endereco": logra, "cep": clean_cep}
+            # Retornamos os dados geocodificados
+            return {
+                "lat": lat_encontrada, 
+                "lon": lon_encontrada, 
+                "endereco": f"{logra} ({r.get('localidade')})", 
+                "cep": clean_cep
+            }
+        
+        # Se não achou com o CEP no texto, tenta uma busca mais genérica, mas ainda travada na região
+        else:
+            query_fallback = f"{r.get('logradouro')}, {r.get('localidade')}, SP"
+            geo2 = _ors_client.pelias_search(text=query_fallback, size=1, rect=cerca_sp)
+            if geo2 and len(geo2['features']) > 0:
+                c2 = geo2['features'][0]['geometry']['coordinates']
+                return {"lat": c2[1], "lon": c2[0], "endereco": logra, "cep": clean_cep}
+
+        return None
     except: 
         return None
-
 
 # --- 3. SETUP API ---
 try:
