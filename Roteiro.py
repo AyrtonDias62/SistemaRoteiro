@@ -57,7 +57,6 @@ def get_coords_cep(cep, _ors_client):
     except Exception as e:
         print(f"Erro na busca: {e}")
         return None
-
 # --- 3. SETUP API ---
 try:
     ors_client = client.Client(key=st.secrets["ORS_KEY"])
