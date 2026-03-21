@@ -172,8 +172,7 @@ if btn and ceps_raw:
     except Exception as e:
         st.error(f"Erro: {e}")
 
-# --- 6. EXIBIÇÃO (ATUALIZADO COM WHATSAPP) ---
-# --- 6. EXIBIÇÃO (VERSÃO FINAL COM MAPA + WHATSAPP) ---
+# --- 6. EXIBIÇÃO (VERSÃO COM COORDENADAS REAIS NO GOOGLE MAPS) ---
 if "v143" in st.session_state:
     r = st.session_state.v143
     st.subheader(f"🏁 Total do Percurso: {r['total']} km")
@@ -185,33 +184,33 @@ if "v143" in st.session_state:
         df_exibicao = pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon'])
         st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
 
-        # --- LÓGICA DO WHATSAPP ---
+        # --- LÓGICA DO WHATSAPP COM COORDENADAS ---
         import urllib.parse
         
-        # 1. Gerar Link do Google Maps (Navegação Sequencial)
-        # Formato: https://www.google.com/maps/dir/Ponto1/Ponto2/Ponto3...
-        lista_enderecos = [p['Destino'].replace(" ", "+") for p in r['tabela']]
-        link_google = f"https://www.google.com/maps/dir/{'/'.join(lista_enderecos)}"
+        # 1. Gerar Link do Google Maps usando LAT,LON para evitar erros de endereço
+        # Formato: https://www.google.com/maps/dir/lat,lon/lat,lon/lat,lon...
+        lista_coords = [f"{p['lat']},{p['lon']}" for p in r['tabela']]
+        link_google = f"https://www.google.com/maps/dir/{'/'.join(lista_coords)}"
 
-        # 2. Montar texto formatado
+        # 2. Montar texto formatado para o WhatsApp
         texto_wpp = f"🚚 *ROTEIRO TECNOLAB*\n"
         texto_wpp += f"Total: {r['total']} km\n\n"
         for p in r['tabela']:
-            texto_wpp += f"📍 *{p['Seq']}*: {p['Destino']}\n"
+            # Se for a Saída ou Retorno, usamos um emoji diferente
+            icon = "🏢" if p['Seq'] in ['Saída', 'Retorno'] else "📍"
+            texto_wpp += f"{icon} *{p['Seq']}*: {p['Destino']}\n"
         
-        texto_wpp += f"\n👉 *INICIAR GPS (Google Maps):*\n{link_google}"
+        texto_wpp += f"\n👉 *INICIAR NAVEGAÇÃO (GPS):*\n{link_google}"
         
         msg_encoded = urllib.parse.quote(texto_wpp)
         link_final_wpp = f"https://api.whatsapp.com/send?text={msg_encoded}"
 
         st.divider()
-        st.link_button("🟢 ENVIAR PARA WHATSAPP", link_final_wpp, use_container_width=True, type="secondary")
+        st.link_button("🟢 ENVIAR PARA WHATSAPP", link_final_wpp, use_container_width=True, type="primary")
 
     with col2:
-        # O MAPA PRECISA FICAR AQUI DENTRO DO COL2
+        # MAPA FOLIUM
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        
-        # Define a cor da linha baseada no modo selecionado na sidebar
         cor_linha = "red" if "Inteligente" in modo else "blue"
         
         folium.PolyLine(r['mapa'], color=cor_linha, weight=5, opacity=0.8).add_to(m)
@@ -220,7 +219,7 @@ if "v143" in st.session_state:
             is_base = p['Seq'] in ['Saída', 'Retorno']
             folium.Marker(
                 [p['lat'], p['lon']], 
-                tooltip=p['Seq'],
+                tooltip=p['Destino'],
                 icon=folium.Icon(color='green' if is_base else 'blue', icon='info-sign')
             ).add_to(m)
         
