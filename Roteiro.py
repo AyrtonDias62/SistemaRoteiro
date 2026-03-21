@@ -172,25 +172,41 @@ if btn and ceps_raw:
     except Exception as e:
         st.error(f"Erro: {e}")
 
-# --- 6. EXIBIÇÃO ---
+# --- 6. EXIBIÇÃO (ATUALIZADO COM WHATSAPP) ---
 if "v143" in st.session_state:
     r = st.session_state.v143
     st.subheader(f"🏁 Total do Percurso: {r['total']} km")
     
     col1, col2 = st.columns([1, 1.2])
     with col1:
-        st.dataframe(pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
-    
-    with col2:
-        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        cor_linha = "red" if "Inteligente" in modo else "blue"
-        folium.PolyLine(r['mapa'], color=cor_linha, weight=5, opacity=0.8).add_to(m)
-        
+        df_exibicao = pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon'])
+        st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
+
+        # --- LÓGICA DO WHATSAPP ---
+        # 1. Gerar Link do Google Maps (Máximo 9 waypoints + origem + destino)
+        base_google = "https://www.google.com/maps/dir/"
+        # Criamos a string de endereços separada por '/'
+        # Google Maps usa: /Origem/Ponto1/Ponto2/.../Destino
+        pontos_url = "/".join([p['Destino'].replace(" ", "+") for p in r['tabela']])
+        link_google = f"{base_google}{pontos_url}"
+
+        # 2. Montar texto para o WhatsApp
+        texto_wpp = f"*Roteiro Tecnolab - Total {r['total']} km*\n\n"
         for p in r['tabela']:
-            is_base = p['Seq'] in ['Saída', 'Retorno']
-            folium.Marker(
-                [p['lat'], p['lon']], 
-                tooltip=p['Seq'],
-                icon=folium.Icon(color='green' if is_base else 'blue')
-            ).add_to(m)
+            texto_wpp += f"{p['Seq']}: {p['Destino']}\n"
+        texto_wpp += f"\n*Abrir no GPS:* {link_google}"
+        
+        # 3. Criar link de redirecionamento (api.whatsapp.com)
+        import urllib.parse
+        msg_encoded = urllib.parse.quote(texto_wpp)
+        link_wpp = f"https://api.whatsapp.com/send?text={msg_encoded}"
+
+        st.divider()
+        st.link_button("🟢 ENVIAR ROTEIRO PARA WHATSAPP", link_wpp, use_container_width=True)
+        st.info("O link acima abrirá o WhatsApp com a lista de endereços e o link do Google Maps pronto para navegar.")
+
+    with col2:
+        # (Seu código do mapa folium continua aqui...)
+        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
+        # ... restante do código do mapa ...
         st_folium(m, use_container_width=True, height=500)
