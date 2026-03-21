@@ -11,7 +11,7 @@ st.set_page_config(page_title="Roteirizador Tecnolab V14.5", layout="wide", page
 
 # --- 2. FUNÇÃO DE COORDENADAS (VERSÃO COM CERCA GEOGRÁFICA RÍGIDA) ---
 @st.cache_data(show_spinner=False)
-def get_coords_cep(cep, _ors_client):
+def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
     try:
         # 1. Limpeza e Consulta ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
@@ -23,7 +23,8 @@ def get_coords_cep(cep, _ors_client):
         logradouro = r.get('logradouro', '')
         cidade = r.get('localidade', '')
         # Se não tiver rua (CEP geral), busca pela cidade
-        texto_busca = f"{logradouro}, {cidade}" if logradouro else f"{cidade}, SP"
+        # AGORA INCLUÍMOS O NÚMERO NA BUSCA TEXTUAL
+        texto_busca = f"{logradouro}, {numero}, {cidade}" if logradouro else f"{cidade}, SP"
 
         # 2. Chamada Direta via API (Ignora limitações da biblioteca Python)
         # Usamos o boundary.circle para travar no ABCD + Grande SP
@@ -48,7 +49,7 @@ def get_coords_cep(cep, _ors_client):
             return {
                 "lat": coords[1], 
                 "lon": coords[0], 
-                "endereco": f"{logradouro or 'CEP '+clean_cep}, {cidade}", 
+                "endereco": f"{logradouro}, {numero} - {cidade}", 
                 "cep": clean_cep
             }
         
@@ -77,25 +78,34 @@ except:
 
 u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep": "Matriz"}
 
-# --- 4. INTERFACE ---
+# --- 4. INTERFACE (COM NÚMERO) ---
 with st.sidebar:
-    st.header("🚚 Sistema Tecnolab")
+    st.header("🚚 Roteirizador Tecnolab")
     modo = st.selectbox("Comportamento do Roteiro:", [
-        "1. Roteiro Travado (Ordem do Input)", 
+        "1. Roteiro Ordenado (Ordem do Input)", 
         "2. Roteiro Inteligente (Circular/Otimizado)"
     ])
     st.divider()
-    ceps_raw = []
+    
+    dados_input = []
     for i in range(5):
-        c = st.text_input(f"CEP {i+1}", key=f"cep_v143_{i}")
-        if c: ceps_raw.append(c)
+        col_cep, col_num = st.columns([2, 1])
+        with col_cep:
+            c = st.text_input(f"CEP {i+1}", key=f"cep_{i}")
+        with col_num:
+            n = st.text_input(f"Nº", key=f"num_{i}")
+        
+        if c: 
+            dados_input.append({"cep": c, "numero": n})
+            
     btn = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
 
 # --- 5. EXECUÇÃO ---
-if btn and ceps_raw:
+if btn and dados_input:
     pts_gps = []
-    for c in ceps_raw:
-        res = get_coords_cep(c, ors_client)
+    for item in dados_input:
+        # Passando CEP e Número para a função
+        res = get_coords_cep(item['cep'], item['numero'], ors_client)
         if res: pts_gps.append(res)
     
     if not pts_gps:
