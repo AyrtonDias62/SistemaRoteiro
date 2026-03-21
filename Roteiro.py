@@ -15,48 +15,58 @@ def get_coords_cep(cep, _ors_client):
     try:
         # 1. Limpeza e Consulta ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
+        if len(clean_cep) != 8: return None
+        
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
 
         logradouro = r.get('logradouro', '')
         cidade = r.get('localidade', '')
-        
-        # 2. Configuração do Círculo de Segurança (ABCD + SP)
-        # Centro: Sua Matriz em SBC (-23.6912, -46.5594)
-        # Raio: 50km (cobre todo o ABCDMRR e capital)
-        ponto_central = [-46.5594, -23.6912] 
-        raio_km = 50 
+        # Se não tiver rua (CEP geral), busca pela cidade
+        texto_busca = f"{logradouro}, {cidade}" if logradouro else f"{cidade}, SP"
 
-        # 3. Funil de Busca
-        # Removendo argumentos nomeados problemáticos e usando a estrutura de filtros
-        tentativas = [
-            f"{logradouro}, {cidade}, SP",
-            f"{clean_cep}, Brasil"
-        ]
+        # 2. Chamada Direta via API (Ignora limitações da biblioteca Python)
+        # Usamos o boundary.circle para travar no ABCD + Grande SP
+        url = "https://api.openrouteservice.org/geocode/search"
+        params = {
+            'api_key': st.secrets["ORS_KEY"],
+            'text': texto_busca,
+            'size': 1,
+            'boundary.circle.lat': -23.6912,  # Latitude da Matriz SBC
+            'boundary.circle.lon': -46.5594,  # Longitude da Matriz SBC
+            'boundary.circle.radius': 50,     # Raio de 50km (Cobre todo ABCD/SP)
+            'layers': 'address,venue,street'  # Foca em endereços reais
+        }
 
-        for texto in tentativas:
-            # Buscamos usando boundary_circle que é amplamente suportado
-            geo = _ors_client.pelias_search(
-                text=texto,
-                size=1,
-                boundary_circle={
-                    "centre": ponto_central,
-                    "radius": raio_km
-                }
-            )
-            
-            if geo and len(geo['features']) > 0:
-                coords = geo['features'][0]['geometry']['coordinates']
-                return {
-                    "lat": coords[1], 
-                    "lon": coords[0], 
-                    "endereco": f"{logradouro or 'CEP '+clean_cep}, {cidade}", 
-                    "cep": clean_cep
-                }
+        response = requests.get(url, params=params)
+        if response.status_code != 200: return None
         
+        geo = response.json()
+        
+        if geo and len(geo['features']) > 0:
+            coords = geo['features'][0]['geometry']['coordinates']
+            return {
+                "lat": coords[1], 
+                "lon": coords[0], 
+                "endereco": f"{logradouro or 'CEP '+clean_cep}, {cidade}", 
+                "cep": clean_cep
+            }
+        
+        # Fallback: Se não achou com a rua, tenta apenas o CEP bruto dentro do círculo
+        params['text'] = f"{clean_cep}, Brasil"
+        response_retry = requests.get(url, params=params)
+        geo_retry = response_retry.json()
+        
+        if geo_retry and len(geo_retry['features']) > 0:
+            coords = geo_retry['features'][0]['geometry']['coordinates']
+            return {
+                "lat": coords[1], "lon": coords[0], 
+                "endereco": f"CEP {clean_cep}, {cidade}", "cep": clean_cep
+            }
+
         return None
     except Exception as e:
-        st.error(f"Erro técnico no CEP {cep}: {e}")
+        st.error(f"Erro ao processar CEP {cep}: {e}")
         return None
 
 # --- 3. SETUP API ---
