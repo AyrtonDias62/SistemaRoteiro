@@ -182,7 +182,7 @@ if btn and dados_input:
     except Exception as e:
         st.error(f"Erro: {e}")
 
-# --- 6. EXIBIÇÃO (VERSÃO COM COORDENADAS REAIS NO GOOGLE MAPS) ---
+# --- 6. EXIBIÇÃO (VERSÃO FINAL: SEM SOBREPOSIÇÃO + POP-UPS NUMERADOS) ---
 if "v143" in st.session_state:
     r = st.session_state.v143
     st.subheader(f"🏁 Total do Percurso: {r['total']} km")
@@ -190,55 +190,65 @@ if "v143" in st.session_state:
     col1, col2 = st.columns([1, 1.2])
     
     with col1:
-        # Tabela de endereços
         df_exibicao = pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon'])
         st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
 
-        # --- LÓGICA DO WHATSAPP COM COORDENADAS ---
+        # --- WHATSAPP COM LINK DE PRECISÃO ---
         import urllib.parse
         
-        # 1. Definimos a Origem e o Destino Final (Matriz)
-        origem = f"{r['tabela'][0]['lat']},{r['tabela'][0]['lon']}"
-        destino = f"{r['tabela'][-1]['lat']},{r['tabela'][-1]['lon']}"
-
-        # 2. Definimos as paradas intermediárias (Waypoints)
-        # O Google Maps prefere o formato /dir/origem/ponto1/ponto2/destino
-        # Mas para forçar a coordenada, usamos o parâmetro 'waypoints'
-        intermediarios = [f"{p['lat']},{p['lon']}" for p in r['tabela'][1:-1]]
-        waypoints = "|".join(intermediarios)
-
-        # 3. Criamos o link oficial de navegação do Google
-        # Este formato força o uso das coordenadas exatas sem tentar "adivinhar" o nome do local
+        # Geramos o link de navegação forçando as coordenadas
+        # O parâmetro 'origin' e 'destination' com lat,lon evita que o Google busque nomes de empresas
+        lista_coords = [f"{p['lat']},{p['lon']}" for p in r['tabela']]
+        origem = lista_coords[0]
+        destino = lista_coords[-1]
+        waypoints = "|".join(lista_coords[1:-1])
+        
+        # Link que força o Google a não "reinterpretar" os nomes
         link_google = f"https://www.google.com/maps/dir/?api=1&origin={origem}&destination={destino}&waypoints={waypoints}&travelmode=driving"
 
-        # 4. Montar o texto do WhatsApp (O restante continua igual)
-        texto_wpp = f"🚚 *ROTEIRO TECNOLAB*\n"
-        texto_wpp += f"Total: {r['total']} km\n\n"
+        texto_wpp = f"🚚 *ROTEIRO TECNOLAB*\nTotal: {r['total']} km\n\n"
         for p in r['tabela']:
             icon = "🏢" if p['Seq'] in ['Saída', 'Retorno'] else "📍"
             texto_wpp += f"{icon} *{p['Seq']}*: {p['Destino']}\n"
-
-        texto_wpp += f"\n👉 *INICIAR NAVEGAÇÃO (GPS):*\n{link_google}"
-
-        msg_encoded = urllib.parse.quote(texto_wpp)
-        link_final_wpp = f"https://api.whatsapp.com/send?text={msg_encoded}"
-
+        
+        texto_wpp += f"\n🚀 *INICIAR NO GOOGLE MAPS:*\n{link_google}"
+        
+        link_final_wpp = f"https://api.whatsapp.com/send?text={urllib.parse.quote(texto_wpp)}"
         st.divider()
         st.link_button("🟢 ENVIAR PARA WHATSAPP", link_final_wpp, use_container_width=True, type="primary")
 
     with col2:
-        # MAPA FOLIUM
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
         cor_linha = "red" if "Inteligente" in modo else "blue"
-        
         folium.PolyLine(r['mapa'], color=cor_linha, weight=5, opacity=0.8).add_to(m)
         
+        # Dicionário para rastrear coordenadas já usadas e evitar sobreposição
+        coords_usadas = {}
+
         for p in r['tabela']:
+            lat, lon = p['lat'], p['lon']
+            
+            # Lógica para evitar que um marcador suma embaixo do outro (mesma rua/número)
+            pos_chave = (round(lat, 5), round(lon, 5))
+            if pos_chave in coords_usadas:
+                coords_usadas[pos_chave] += 1
+                # Desloca levemente o marcador (0.0001 aprox 10 metros)
+                lat += 0.0001 * coords_usadas[pos_chave]
+                lon += 0.0001 * coords_usadas[pos_chave]
+            else:
+                coords_usadas[pos_chave] = 0
+
             is_base = p['Seq'] in ['Saída', 'Retorno']
+            
+            # Pop-up formatado com a Ordem e o Endereço
+            conteudo_popup = f"<b>{p['Seq']}</b><br>{p['Destino']}"
+            
             folium.Marker(
-                [p['lat'], p['lon']], 
-                tooltip=p['Destino'],
-                icon=folium.Icon(color='green' if is_base else 'blue', icon='info-sign')
+                [lat, lon], 
+                popup=folium.Popup(conteudo_popup, max_width=300),
+                tooltip=f"{p['Seq']} - Clique para detalhes",
+                icon=folium.Icon(color='green' if is_base else 'blue', 
+                                 icon='play' if p['Seq'] == 'Saída' else 'info-sign')
             ).add_to(m)
         
         st_folium(m, use_container_width=True, height=500)
