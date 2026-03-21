@@ -13,50 +13,49 @@ st.set_page_config(page_title="Roteirizador Tecnolab V14.4", layout="wide", page
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
+        # 1. Limpeza e Consulta ao ViaCEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
+        if len(clean_cep) != 8: return None
+        
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
-        
-        logra = f"{r.get('logradouro')}, {r.get('bairro')}"
-        query = f"{logra}, {r.get('localidade')}, Brasil"
 
-        # --- CONFIGURAÇÃO DA CERCA GEOGRÁFICA (BOUNDARY RECT) ---
-        # Definimos um retângulo que engloba a Grande SP e o ABC
+        # 2. Extração de dados do ViaCEP
+        logradouro = r.get('logradouro')
+        bairro = r.get('bairro')
+        cidade = r.get('localidade')
+        
+        # Se o ViaCEP não retornar logradouro (comum em cidades pequenas ou CEPs gerais), 
+        # usamos a cidade como busca, mas para o ABCD isso raramente ocorre.
+        texto_busca = f"{logradouro}, {bairro}, {cidade}" if logradouro else f"{cidade}, SP"
+
+        # 3. Definição da "Cerca" (ABCDMRR + Grande SP)
         # min_lon, min_lat, max_lon, max_lat
         cerca_sp = {
-            "min_lon": -47.20, "min_lat": -24.00, 
-            "max_lon": -45.70, "max_lat": -23.20
+            "min_lon": -47.00, "min_lat": -24.05, 
+            "max_lon": -46.10, "max_lat": -23.30
         }
 
-        # Realizamos a busca usando o parâmetro boundary_rect
+        # 4. Busca no OpenRouteService SEM o número do CEP no texto
+        # O 'rect' garante que ele não fuja para outro estado
         geo = _ors_client.pelias_search(
-            text=query, 
+            text=texto_busca, 
             size=1, 
-            rect=cerca_sp  # <--- TRAVA RÍGIDA AQUI
+            rect=cerca_sp
         )
         
         if geo and len(geo['features']) > 0:
             c = geo['features'][0]['geometry']['coordinates']
-            lat_encontrada, lon_encontrada = c[1], c[0]
-            
-            # Retornamos os dados geocodificados
             return {
-                "lat": lat_encontrada, 
-                "lon": lon_encontrada, 
-                "endereco": f"{logra} ({r.get('localidade')})", 
+                "lat": c[1], 
+                "lon": c[0], 
+                "endereco": f"{logradouro}, {bairro} - {cidade}", 
                 "cep": clean_cep
             }
-        
-        # Se não achou com o CEP no texto, tenta uma busca mais genérica, mas ainda travada na região
-        else:
-            query_fallback = f"{r.get('logradouro')}, {r.get('localidade')}, SP"
-            geo2 = _ors_client.pelias_search(text=query_fallback, size=1, rect=cerca_sp)
-            if geo2 and len(geo2['features']) > 0:
-                c2 = geo2['features'][0]['geometry']['coordinates']
-                return {"lat": c2[1], "lon": c2[0], "endereco": logra, "cep": clean_cep}
-
+            
         return None
-    except: 
+    except Exception as e:
+        print(f"Erro na busca: {e}")
         return None
 
 # --- 3. SETUP API ---
