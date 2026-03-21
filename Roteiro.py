@@ -17,7 +17,7 @@ def get_coords_cep(cep, _ors_client):
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         if len(clean_cep) != 8: return None
         
-        # 2. Consulta ViaCEP (Nossa fonte da verdade para o nome da rua)
+        # 2. Consulta ViaCEP
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
 
@@ -26,26 +26,28 @@ def get_coords_cep(cep, _ors_client):
         cidade = r.get('localidade', '')
         
         # 3. Definição da Cerca Geográfica (Grande SP + ABCD)
-        # min_lon, min_lat, max_lon, max_lat
+        # O parâmetro boundary_rect na biblioteca Python espera:
+        # { 'min_lon': ..., 'min_lat': ..., 'max_lon': ..., 'max_lat': ... }
         cerca_sp = {
             "min_lon": -47.10, "min_lat": -24.00, 
             "max_lon": -46.10, "max_lat": -23.30
         }
 
-        # --- FUNIL DE BUSCA (Tentativas sucessivas) ---
+        # --- FUNIL DE BUSCA ---
         tentativas = [
-            f"{logradouro}, {cidade}, SP",            # 1. Rua + Cidade
-            f"{logradouro}, {bairro}, {cidade}",      # 2. Rua + Bairro + Cidade
-            f"{clean_cep}, Brasil"                    # 3. Apenas o CEP (Último recurso)
+            f"{logradouro}, {cidade}, SP",
+            f"{logradouro}, {bairro}, {cidade}",
+            f"{clean_cep}, Brasil"
         ]
 
         for texto in tentativas:
-            if not logradouro and "Brasil" not in texto: continue # Pula se não tiver rua
+            if not logradouro and "Brasil" not in texto: continue
             
+            # CORREÇÃO: Usando boundary_rect em vez de rect
             geo = _ors_client.pelias_search(
                 text=texto, 
                 size=1, 
-                rect=cerca_sp
+                boundary_rect=cerca_sp  # <--- Nome correto do parâmetro no Python
             )
             
             if geo and len(geo['features']) > 0:
@@ -59,7 +61,8 @@ def get_coords_cep(cep, _ors_client):
         
         return None
     except Exception as e:
-        st.warning(f"Erro ao processar CEP {cep}: {e}")
+        # Mostra o erro exato no Streamlit para sabermos o que houve
+        st.error(f"Erro no CEP {cep}: {e}")
         return None
 
 # --- 3. SETUP API ---
