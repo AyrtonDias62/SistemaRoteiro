@@ -13,50 +13,55 @@ st.set_page_config(page_title="Roteirizador Tecnolab V14.4", layout="wide", page
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep, _ors_client):
     try:
-        # 1. Limpeza e Consulta ao ViaCEP
+        # 1. Limpeza do CEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         if len(clean_cep) != 8: return None
         
+        # 2. Consulta ViaCEP (Nossa fonte da verdade para o nome da rua)
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
 
-        # 2. Extração de dados do ViaCEP
-        logradouro = r.get('logradouro')
-        bairro = r.get('bairro')
-        cidade = r.get('localidade')
+        logradouro = r.get('logradouro', '')
+        bairro = r.get('bairro', '')
+        cidade = r.get('localidade', '')
         
-        # Se o ViaCEP não retornar logradouro (comum em cidades pequenas ou CEPs gerais), 
-        # usamos a cidade como busca, mas para o ABCD isso raramente ocorre.
-        texto_busca = f"{logradouro}, {bairro}, {cidade}" if logradouro else f"{cidade}, SP"
-
-        # 3. Definição da "Cerca" (ABCDMRR + Grande SP)
+        # 3. Definição da Cerca Geográfica (Grande SP + ABCD)
         # min_lon, min_lat, max_lon, max_lat
         cerca_sp = {
-            "min_lon": -47.00, "min_lat": -24.05, 
+            "min_lon": -47.10, "min_lat": -24.00, 
             "max_lon": -46.10, "max_lat": -23.30
         }
 
-        # 4. Busca no OpenRouteService SEM o número do CEP no texto
-        # O 'rect' garante que ele não fuja para outro estado
-        geo = _ors_client.pelias_search(
-            text=texto_busca, 
-            size=1, 
-            rect=cerca_sp
-        )
-        
-        if geo and len(geo['features']) > 0:
-            c = geo['features'][0]['geometry']['coordinates']
-            return {
-                "lat": c[1], 
-                "lon": c[0], 
-                "endereco": f"{logradouro}, {bairro} - {cidade}", 
-                "cep": clean_cep
-            }
+        # --- FUNIL DE BUSCA (Tentativas sucessivas) ---
+        tentativas = [
+            f"{logradouro}, {cidade}, SP",            # 1. Rua + Cidade
+            f"{logradouro}, {bairro}, {cidade}",      # 2. Rua + Bairro + Cidade
+            f"{clean_cep}, Brasil"                    # 3. Apenas o CEP (Último recurso)
+        ]
+
+        for texto in tentativas:
+            if not logradouro and "Brasil" not in texto: continue # Pula se não tiver rua
             
+            geo = _ors_client.pelias_search(
+                text=texto, 
+                size=1, 
+                rect=cerca_sp
+            )
+            
+            if geo and len(geo['features']) > 0:
+                c = geo['features'][0]['geometry']['coordinates']
+                return {
+                    "lat": c[1], 
+                    "lon": c[0], 
+                    "endereco": f"{logradouro or 'CEP '+clean_cep}, {cidade}", 
+                    "cep": clean_cep
+                }
+        
         return None
     except Exception as e:
-        print(f"Erro na busca: {e}")
+        st.warning(f"Erro ao processar CEP {cep}: {e}")
         return None
+
 # --- 3. SETUP API ---
 try:
     ors_client = client.Client(key=st.secrets["ORS_KEY"])
