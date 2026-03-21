@@ -197,21 +197,29 @@ if "v143" in st.session_state:
         # --- LÓGICA DO WHATSAPP COM COORDENADAS ---
         import urllib.parse
         
-        # 1. Gerar Link do Google Maps usando LAT,LON para evitar erros de endereço
-        # Formato: https://www.google.com/maps/dir/lat,lon/lat,lon/lat,lon...
-        lista_coords = [f"{p['lat']},{p['lon']}" for p in r['tabela']]
-        link_google = f"https://www.google.com/maps/dir/{'/'.join(lista_coords)}"
+        # 1. Definimos a Origem e o Destino Final (Matriz)
+        origem = f"{r['tabela'][0]['lat']},{r['tabela'][0]['lon']}"
+        destino = f"{r['tabela'][-1]['lat']},{r['tabela'][-1]['lon']}"
 
-        # 2. Montar texto formatado para o WhatsApp
+        # 2. Definimos as paradas intermediárias (Waypoints)
+        # O Google Maps prefere o formato /dir/origem/ponto1/ponto2/destino
+        # Mas para forçar a coordenada, usamos o parâmetro 'waypoints'
+        intermediarios = [f"{p['lat']},{p['lon']}" for p in r['tabela'][1:-1]]
+        waypoints = "|".join(intermediarios)
+
+        # 3. Criamos o link oficial de navegação do Google
+        # Este formato força o uso das coordenadas exatas sem tentar "adivinhar" o nome do local
+        link_google = f"https://www.google.com/maps/dir/?api=1&origin={origem}&destination={destino}&waypoints={waypoints}&travelmode=driving"
+
+        # 4. Montar o texto do WhatsApp (O restante continua igual)
         texto_wpp = f"🚚 *ROTEIRO TECNOLAB*\n"
         texto_wpp += f"Total: {r['total']} km\n\n"
         for p in r['tabela']:
-            # Se for a Saída ou Retorno, usamos um emoji diferente
             icon = "🏢" if p['Seq'] in ['Saída', 'Retorno'] else "📍"
             texto_wpp += f"{icon} *{p['Seq']}*: {p['Destino']}\n"
-        
+
         texto_wpp += f"\n👉 *INICIAR NAVEGAÇÃO (GPS):*\n{link_google}"
-        
+
         msg_encoded = urllib.parse.quote(texto_wpp)
         link_final_wpp = f"https://api.whatsapp.com/send?text={msg_encoded}"
 
