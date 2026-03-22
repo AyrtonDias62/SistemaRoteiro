@@ -13,24 +13,17 @@ st.set_page_config(page_title="Tecnolab V15.6", layout="wide", page_icon="🧪")
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
     try:
-        # Limpeza total de caracteres
         cep = "".join(filter(str.isdigit, str(cep_raw)))
         num = "".join(filter(str.isdigit, str(num_raw)))
         if len(cep) != 8: return None
         
-        # 1. Consulta ViaCEP (Fonte da Verdade para o Endereço)
-        v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/", timeout=5).json()
+        # 1. ViaCEP para o texto correto
+        v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/").json()
         if "erro" in v_res: return None
-        
         logradouro = v_res.get('logradouro')
-        bairro = v_res.get('bairro')
-        cidade = v_res.get('localidade')
-
-        # 2. TENTATIVAS DE LOCALIZAÇÃO (GPS)
-        url = "https://api.openrouteservice.org/geocode/search"
-        headers = {'Authorization': _ors_key}
         
-        # Tentativa 1: CEP + Número (A mais precisa para evitar Rua Coimbra)
+        # 2. Busca Geográfica (Filtro Anti-Coimbra)
+        url = "https://api.openrouteservice.org/geocode/search"
         params = {
             'api_key': _ors_key,
             'text': f"{cep}, {num}, Brasil",
@@ -38,84 +31,66 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
             'layers': 'address',
             'boundary.circle.lat': -23.6912,
             'boundary.circle.lon': -46.5594,
-            'boundary.circle.radius': 50
+            'boundary.circle.radius': 40
         }
-        
         resp = requests.get(url, params=params).json()
-
-        # Tentativa 2: Nome da Rua + Número + Cidade (Se o CEP falhar no motor do mapa)
-        if not resp.get('features'):
-            params['text'] = f"{logradouro}, {num}, {cidade}, SP"
-            resp = requests.get(url, params=params).json()
-
-        # Tentativa 3: Apenas o CEP (Último recurso)
-        if not resp.get('features'):
-            params['text'] = f"{cep}, Brasil"
-            params.pop('layers', None)
-            resp = requests.get(url, params=params).json()
+        
+        # Validação: Se o ORS retornar "Coimbra" em vez de "Columbia", forçamos busca por CEP
+        if resp.get('features'):
+            nome_maps = resp['features'][0]['properties'].get('label', '').lower()
+            if "coimbra" in nome_maps and "columbia" in logradouro.lower():
+                params['text'] = f"{cep}, Brasil" # Busca só pelo CEP
+                resp = requests.get(url, params=params).json()
 
         if resp.get('features'):
-            feat = resp['features'][0]
-            coords = feat['geometry']['coordinates']
+            coords = resp['features'][0]['geometry']['coordinates']
             return {
                 "lat": coords[1], "lon": coords[0], 
-                "endereco": f"{logradouro}, {num} - {bairro}", 
-                "cidade": cidade
+                "endereco": f"{logradouro}, {num} - {v_res.get('bairro')}", 
+                "cidade": v_res.get('localidade')
             }
         return None
-    except Exception as e:
-        st.error(f"Erro técnico na busca: {e}")
-        return None
+    except: return None
 
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
 u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
-# --- 3. SIDEBAR (CORREÇÃO DO BOTÃO LIMPAR) ---
-# --- Na seção da Sidebar ---
+# --- 3. SIDEBAR (RESET TOTAL CORRIGIDO) ---
 with st.sidebar:
-    st.title("🚚 Gestão de Rotas")
-    modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"])
-    st.divider()
+    st.title("🚚 Roteirizador")
     
-    inputs = []
-    # Usamos o range para criar os campos
-    for i in range(5):
-        c1, c2 = st.columns([2, 1])
-        # A chave (key) deve ser única. Se ela for deletada do session_state, o campo reseta.
-        with c1: 
-            ce = st.text_input(f"CEP {i+1}", key=f"z_cep_{i}")
-        with c2: 
-            nu = st.text_input(f"Nº", key=f"z_num_{i}")
+    # Criamos um formulário que pode ser resetado
+    with st.form("meu_formulario", clear_on_submit=True):
+        modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"])
+        st.divider()
         
-        if ce: 
-            inputs.append({"cep": ce, "num": nu})
+        input_data = []
+        for i in range(5):
+            c1, c2 = st.columns([2, 1])
+            with c1: ce = st.text_input(f"CEP {i+1}", placeholder="00000000")
+            with c2: nu = st.text_input(f"Nº {i+1}", placeholder="123")
+            if ce: input_data.append({"cep": ce, "num": nu})
+        
+        st.divider()
+        # O botão dentro do formulário processa os dados
+        btn_gerar = st.form_submit_button("🚀 GERAR ROTEIRO", use_container_width=True)
 
-    st.divider()
-    
-    col_gerar, col_limpar = st.columns(2)
-    
-    with col_gerar:
-        btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
-    
-    with col_limpar:
-        if st.button("🗑️ LIMPAR", use_container_width=True):
-            # 1. Limpa todas as chaves de input e de resultados
-            for key in list(st.session_state.keys()):
-                if key.startswith("z_") or "v15" in key:
-                    del st.session_state[key]
-            # 2. Força o reinício imediato para limpar a tela
-            st.rerun()
+    # Botão de limpar fora do formulário para resetar o session_state
+    if st.button("🗑️ LIMPAR TUDO", use_container_width=True):
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        st.rerun()
 
 # --- 4. LOGÍSTICA ---
-if btn_gerar and inputs:
+# Como usamos formulário, precisamos salvar os inputs na sessão para não sumirem
+if btn_gerar and input_data:
     pts_gps = []
-    for item in inputs:
+    for item in input_data:
         res = get_coords_cep(item['cep'], item['num'], ORS_KEY)
         if res: pts_gps.append(res)
-        else: st.error(f"Erro: CEP {item['cep']} não localizado.")
-
+    
     if pts_gps:
         if "Otimizar" in modo:
             pendentes, atual, ordenados = pts_gps.copy(), u_base, []
@@ -127,62 +102,38 @@ if btn_gerar and inputs:
         else: ordenados = pts_gps
 
         rota_total = [u_base] + ordenados + [u_base]
-        tabela_final, geometria, total_km, total_min = [], [], 0, 0
+        tabela, geometria, km_total, min_total = [], [], 0, 0
         
-        tabela_final.append({"Ordem": "SAÍDA", "Local": u_base['endereco'], "Dist. Trecho": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
+        tabela.append({"Ordem": "SAÍDA", "Local": u_base['endereco'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
 
         for i in range(len(rota_total) - 1):
             A, B = rota_total[i], rota_total[i+1]
-            dir_res = ors_client.directions(coordinates=[[A['lon'], A['lat']], [B['lon'], B['lat']]], profile='driving-car', format='geojson')
+            dr = ors_client.directions(coordinates=[[A['lon'], A['lat']], [B['lon'], B['lat']]], profile='driving-car', format='geojson')
+            sum_ = dr['features'][0]['properties']['summary']
+            d, t = round(sum_['distance']/1000, 2), round(sum_['duration']/60)
+            km_total += d; min_total += t
+            geometria.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
             
-            summary = dir_res['features'][0]['properties']['summary']
-            d_km = round(summary['distance'] / 1000, 2)
-            t_min = round(summary['duration'] / 60)
-            
-            total_km += d_km
-            total_min += t_min
-            geometria.extend([[c[1], c[0]] for c in dir_res['features'][0]['geometry']['coordinates']])
-            
-            label = "RETORNO" if i == len(rota_total) - 2 else f"{i+1}ª PARADA"
-            tabela_final.append({
-                "Ordem": label, "Local": B['endereco'], 
-                "Dist. Trecho": f"{d_km} km", "Tempo": f"{t_min} min",
-                "lat": B['lat'], "lon": B['lon']
-            })
+            label = "RETORNO" if i == len(rota_total)-2 else f"{i+1}ª PARADA"
+            tabela.append({"Ordem": label, "Local": B['endereco'], "Dist.": f"{d} km", "Tempo": f"{t} min", "lat": B['lat'], "lon": B['lon']})
 
-        st.session_state.v155 = {"tabela": tabela_final, "linha": geometria, "km": round(total_km, 2), "min": total_min}
+        st.session_state.v156 = {"t": tabela, "g": geometria, "k": round(km_total, 2), "m": min_total}
 
 # --- 5. EXIBIÇÃO ---
-if "v155" in st.session_state:
-    d = st.session_state.v155
-    st.header(f"📊 Resumo: {d['km']} km | Tempo Estimado: {d['min']} min")
+if "v156" in st.session_state:
+    res = st.session_state.v156
+    st.header(f"📊 Resumo: {res['k']} km | {res['m']} min")
     
     c1, c2 = st.columns([1.1, 1])
     with c1:
-        st.dataframe(pd.DataFrame(d['tabela']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
-        
-        # WhatsApp Link
-        msg = f"🚚 *ROTEIRO TECNOLAB*\nTotal: {d['km']}km\n\n"
-        coords_url = []
-        for p in d['tabela']:
-            msg += f"*{p['Ordem']}*: {p['Local']}\n"
-            coords_url.append(f"{p['lat']},{p['lon']}")
-        
-        link_google = f"https://www.google.com/maps/dir/{'/'.join(coords_url)}"
-        msg += f"\n📍 *GPS:* {link_google}"
-        st.link_button("🟢 ENVIAR PARA WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg)}", use_container_width=True)
+        st.dataframe(pd.DataFrame(res['t']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
+        coords_u = [f"{p['lat']},{p['lon']}" for p in res['t']]
+        link = f"https://www.google.com/maps/dir/{'/'.join(coords_u)}"
+        st.link_button("🟢 WHATSAPP / GPS", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
 
     with c2:
-        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=14)
-        folium.PolyLine(d['linha'], color="red", weight=5, opacity=0.7).add_to(m)
-        
-        for p in d['tabela']:
-            cor = "green" if p['Ordem'] in ["SAÍDA", "RETORNO"] else "blue"
-            folium.Marker(
-                [p['lat'], p['lon']],
-                popup=f"<b>{p['Ordem']}</b><br>{p['Local']}", # Ordem primeiro no popup
-                tooltip=p['Ordem'],
-                icon=folium.Icon(color=cor, icon='info-sign')
-            ).add_to(m)
-        
-        st_folium(m, use_container_width=True, height=550)
+        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=13)
+        folium.PolyLine(res['g'], color="red", weight=5).add_to(m)
+        for p in res['t']:
+            folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b><br>{p['Local']}", icon=folium.Icon(color="blue")).add_to(m)
+        st_folium(m, use_container_width=True, height=500)
