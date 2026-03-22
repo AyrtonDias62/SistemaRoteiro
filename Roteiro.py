@@ -9,14 +9,20 @@ import urllib.parse
 import os
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.5", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.6", layout="wide", page_icon="🧪")
 
-# CSS para compactar a Sidebar (diminuir espaços vazios no topo e entre campos)
+# CSS Ajustado: Mantém a Sidebar compacta, mas dá espaço ao conteúdo principal (Main)
 st.markdown("""
     <style>
+        /* Compacta a Sidebar */
         [data-testid="stSidebarNav"] {display: none;}
-        .block-container {padding-top: 1rem;}
-        [data-testid="stVerticalBlock"] {gap: 0.5rem;}
+        section[data-testid="stSidebar"] .block-container {padding-top: 1.5rem !important;}
+        
+        /* Protege o conteúdo principal para não cortar o topo */
+        .main .block-container {padding-top: 3rem !important;}
+        
+        /* Ajusta o espaçamento entre elementos */
+        [data-testid="stVerticalBlock"] {gap: 0.6rem;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,9 +61,8 @@ ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
 u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
-# --- 3. SIDEBAR OTIMIZADA ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
-    # Imagem reduzida (width=150) e centralizada para economizar espaço vertical
     img_path = "furgao_tecnolab.png"
     if os.path.exists(img_path):
         st.image(img_path, width=180) 
@@ -66,14 +71,12 @@ with st.sidebar:
     
     if 'reset_id' not in st.session_state: st.session_state.reset_id = 0
 
-    # Radio em formato horizontal para ganhar espaço vertical
     modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"], 
                     key=f"m_{st.session_state.reset_id}", horizontal=True)
     
     st.divider()
     
     entradas = []
-    # Loop de 5 paradas com inputs mais baixos
     for i in range(5):
         c1, c2 = st.columns([1.5, 0.8])
         with c1:
@@ -84,13 +87,12 @@ with st.sidebar:
 
     st.divider()
     
-    # Botões lado a lado
     col_g, col_l = st.columns(2)
     with col_g:
         btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v165" in st.session_state: del st.session_state.res_v165
+            if "res_v166" in st.session_state: del st.session_state.res_v166
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -127,20 +129,21 @@ if btn_gerar and entradas:
                 lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
                 tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
-        st.session_state.res_v165 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v166 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v165" in st.session_state:
-    d = st.session_state.res_v165
-    st.header(f"📊 {d['k']} km | {d['m']} min")
+if "res_v166" in st.session_state:
+    d = st.session_state.res_v166
+    st.header(f"📊 Resumo: {d['k']} km | {d['m']} min")
+    
     c1, c2 = st.columns([1.1, 1])
     with c1:
         st.dataframe(pd.DataFrame(d['t']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
         link = f"https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
-        st.link_button("🟢 WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
+        st.link_button("🟢 WHATSAPP / GPS", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
     with c2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
         if d['l']: folium.PolyLine(d['l'], color="red", weight=5).add_to(m)
         for p in d['t']:
             folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b>", icon=folium.Icon(color="green" if "Matriz" in p['Local'] else "blue")).add_to(m)
-        st_folium(m, use_container_width=True, height=450)
+        st_folium(m, use_container_width=True, height=480)
