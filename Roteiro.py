@@ -37,7 +37,7 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
             'boundary.circle.lat': -23.6912,  # Latitude da Matriz SBC
             'boundary.circle.lon': -46.5594,  # Longitude da Matriz SBC
             'boundary.circle.radius': 50,     # Raio de 50km (Cobre todo ABCD/SP)
-            'layers': 'address'  # Foca em endereços reais
+            'layers': 'address',  # Foca em endereços reais
             'sources': 'openstreetmap,openaddresses' # Fontes mais precisas para números
         }
 
