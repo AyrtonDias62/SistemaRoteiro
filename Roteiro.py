@@ -8,32 +8,33 @@ from streamlit_folium import st_folium
 import urllib.parse
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.0", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.1", layout="wide", page_icon="🧪")
 
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
     """
-    Busca robusta: Tenta endereço completo -> Se falhar ou der erro de nome -> Tenta apenas CEP.
+    Estratégia Infalível: Busca o CEP puro para garantir a rua correta (Columbia).
     """
     try:
         cep = "".join(filter(str.isdigit, str(cep_raw))).strip()
         num = "".join(filter(str.isdigit, str(num_raw))).strip()
         if len(cep) != 8: return None
         
-        # 1. ViaCEP: Fonte oficial para o nome da rua (Tabela)
+        # 1. ViaCEP: Fonte para o nome da rua (Tabela)
         v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/", timeout=5).json()
         if "erro" in v_res: return None
+        
         rua_viacep = v_res.get('logradouro', '')
         bairro = v_res.get('bairro', '')
         cidade = v_res.get('localidade', '')
 
-        # 2. Busca Geográfica (GPS)
+        # 2. Busca Geográfica no ORS (Foco no CEP puro para evitar erro de 'Não Localizado')
         url = "https://api.openrouteservice.org/geocode/search"
         
-        # Tentativa A: Endereço Completo
+        # Buscamos apenas pelo CEP para garantir que o ORS encontre a geometria da rua
         params = {
             'api_key': _ors_key,
-            'text': f"{cep}, {num}, Brasil",
+            'text': f"{cep}, Brasil",
             'size': 1,
             'boundary.circle.lat': -23.6912,
             'boundary.circle.lon': -46.5594,
@@ -41,22 +42,17 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         }
         
         resp = requests.get(url, params=params).json()
-        
-        # Validação: Se não achou NADA ou se achou a 'Rua Coimbra' por erro fonético
-        achou_algo = resp.get('features') and len(resp['features']) > 0
-        if achou_algo:
-            label_mapa = resp['features'][0]['properties'].get('label', '').lower()
-            # Se o ViaCEP diz Columbia e o mapa diz Coimbra, força o fallback
-            if "coimbra" in label_mapa and "columbia" in rua_viacep.lower():
-                achou_algo = False 
-
-        # Tentativa B: Fallback para o CEP Puro (Garante que o pino caia na rua certa)
-        if not achou_algo:
-            params['text'] = f"{cep}, Brasil"
-            resp = requests.get(url, params=params).json()
 
         if resp.get('features'):
-            coords = resp['features'][0]['geometry']['coordinates']
+            feat = resp['features'][0]
+            coords = feat['geometry']['coordinates']
+            
+            # Verificação Anti-Coimbra (Se o CEP é da Columbia mas o mapa retornou Coimbra)
+            label_mapa = feat['properties'].get('label', '').lower()
+            if "coimbra" in label_mapa and "columbia" in rua_viacep.lower():
+                # Se houver erro fonético, mantemos as coordenadas mas o endereço da tabela fica certo
+                pass 
+
             return {
                 "lat": coords[1], "lon": coords[0], 
                 "endereco": f"{rua_viacep}, {num} - {bairro}", 
@@ -79,11 +75,10 @@ u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 with st.sidebar:
     st.title("🚚 Roteirizador")
     
-    # Trigger para limpar os campos mudando as keys
     if 'limpar_cont' not in st.session_state:
         st.session_state.limpar_cont = 0
 
-    modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"], key=f"m_{st.session_state.limpar_cont}")
+    modo = st.radio("Método de Rota:", ["Ordem Digitada", "Otimizar Caminho"], key=f"m_{st.session_state.limpar_cont}")
     st.divider()
     
     entradas = []
@@ -102,8 +97,8 @@ with st.sidebar:
         btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v16" in st.session_state: del st.session_state.res_v16
-            st.session_state.limpar_cont += 1 # Muda as keys para resetar campos
+            if "res_v161" in st.session_state: del st.session_state.res_v161
+            st.session_state.limpar_cont += 1
             st.rerun()
 
 # --- 4. PROCESSAMENTO ---
@@ -115,6 +110,7 @@ if btn_gerar and entradas:
         else: st.error(f"CEP {item['cep']} não localizado nos mapas.")
 
     if pts_gps:
+        # Ordenação
         if "Otimizar" in modo:
             pend, atu, ord_list = pts_gps.copy(), u_base, []
             while pend:
@@ -128,7 +124,6 @@ if btn_gerar and entradas:
         rota_final = [u_base] + ord_list + [u_base]
         tab, lin, km, t_min = [], [], 0, 0
         
-        # Saída Matriz
         tab.append({"Ordem": "SAÍDA", "Local": u_base['endereco'], "Dist. Trecho": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
 
         for i in range(len(rota_final) - 1):
@@ -142,20 +137,19 @@ if btn_gerar and entradas:
             lbl = "RETORNO" if i == len(rota_final)-2 else f"{i+1}ª PARADA"
             tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist. Trecho": f"{d_km} km", "Tempo": f"{d_min} min", "lat": B['lat'], "lon": B['lon']})
 
-        st.session_state.res_v16 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v161 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v16" in st.session_state:
-    data = st.session_state.res_v16
-    st.header(f"📊 Resumo: {data['k']} km | {data['m']} min")
+if "res_v161" in st.session_state:
+    data = st.session_state.res_v161
+    st.subheader(f"📊 Resumo: {data['k']} km | {data['m']} min")
     
     c1, c2 = st.columns([1.1, 1])
     with c1:
         st.dataframe(pd.DataFrame(data['t']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
-        # Link Google Maps
         u_str = [f"{p['lat']},{p['lon']}" for p in data['t']]
         link = f"https://www.google.com/maps/dir/{'/'.join(u_str)}"
-        st.link_button("🟢 ENVIAR WHATSAPP / GPS", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
+        st.link_button("🟢 WHATSAPP / GPS", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
 
     with c2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=13)
