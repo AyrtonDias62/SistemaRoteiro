@@ -80,6 +80,7 @@ u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep
 
 # --- 4. INTERFACE (COM NÚMERO) ---
 # --- 4. INTERFACE (ATUALIZADA COM BOTÃO LIMPAR) ---
+# --- 4. INTERFACE (ORGANIZADA) ---
 with st.sidebar:
     st.header("🚚 Sistema Tecnolab")
     modo = st.selectbox("Comportamento do Roteiro:", [
@@ -92,43 +93,26 @@ with st.sidebar:
     for i in range(5):
         col_cep, col_num = st.columns([2, 1])
         with col_cep:
-            # Usamos chaves dinâmicas para o reset funcionar
-            c = st.text_input(f"CEP {i+1}", key=f"cep_input_{i}")
+            # Importante: o prefixo 'input_' ajuda o botão limpar a identificar o que apagar
+            c = st.text_input(f"CEP {i+1}", key=f"input_cep_{i}")
         with col_num:
-            n = st.text_input(f"Nº", key=f"num_input_{i}")
+            n = st.text_input(f"Nº", key=f"input_num_{i}")
         
         if c: 
             dados_input.append({"cep": c, "numero": n})
             
-    # Colunas para os botões ficarem alinhados
-    col_btn1, col_btn2 = st.columns(2)
+    # Botão de Gerar
+    btn = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
     
-    with col_btn1:
-        btn = st.button("🚀 GERAR", use_container_width=True, type="primary")
-    
-    with col_btn2:
-        # Botão de Limpar
-        if st.button("🗑️ LIMPAR", use_container_width=True):
-            # Limpa todas as chaves de input do session_state
-            for key in st.session_state.keys():
-                if "input_" in key or "v143" in key:
-                    del st.session_state[key]
-            st.rerun() # Reinicia o app com os campos vazios
+    # Botão de Limpar logo abaixo
+    if st.button("🗑️ LIMPAR CAMPOS", use_container_width=True):
+        # Remove todas as chaves de entrada e o resultado do roteiro do estado da sessão
+        for key in list(st.session_state.keys()):
+            if "input_" in key or "v143" in key:
+                del st.session_state[key]
+        st.rerun() # Recarrega a página do zero
 
     st.divider()
-    
-    dados_input = []
-    for i in range(5):
-        col_cep, col_num = st.columns([2, 1])
-        with col_cep:
-            c = st.text_input(f"CEP {i+1}", key=f"cep_{i}")
-        with col_num:
-            n = st.text_input(f"Nº", key=f"num_{i}")
-        
-        if c: 
-            dados_input.append({"cep": c, "numero": n})
-            
-    btn = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
 
 # --- 5. EXECUÇÃO ---
 if btn and dados_input:
