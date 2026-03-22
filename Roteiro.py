@@ -8,41 +8,58 @@ from streamlit_folium import st_folium
 import urllib.parse
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Tecnolab Logística V15.4", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V15.5", layout="wide", page_icon="🧪")
 
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
     try:
+        # 1. Limpeza rigorosa dos inputs
         cep = "".join(filter(str.isdigit, str(cep_raw)))
         num = "".join(filter(str.isdigit, str(num_raw)))
         if len(cep) != 8: return None
         
-        # ViaCEP para exibição textual
-        v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/").json()
+        # 2. Consulta ViaCEP (Fonte primária de texto)
+        v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/", timeout=5).json()
         if "erro" in v_res: return None
         
-        # Busca Geográfica focada no CEP (Evita confusão Columbia x Coimbra)
+        logradouro = v_res.get('logradouro')
+        bairro = v_res.get('bairro')
+        cidade = v_res.get('localidade')
+
+        # 3. ESTRATÉGIA DE BUSCA GEOGRÁFICA (3 Tentativas)
         url = "https://api.openrouteservice.org/geocode/search"
-        params = {
+        common_params = {
             'api_key': _ors_key,
-            'text': f"{cep}, {num}, Brasil",
             'size': 1,
-            'layers': 'address',
             'boundary.circle.lat': -23.6912,
             'boundary.circle.lon': -46.5594,
             'boundary.circle.radius': 50
         }
-        resp = requests.get(url, params=params).json()
-        
+
+        # Tentativa A: CEP + Número (Mais preciso para Rua Columbia)
+        params_a = {**common_params, 'text': f"{cep}, {num}, Brasil", 'layers': 'address'}
+        resp = requests.get(url, params=params_a).json()
+
+        # Tentativa B: Nome da Rua + Número + Cidade (Fallback se o CEP não estiver mapeado no ORS)
+        if not resp.get('features'):
+            params_b = {**common_params, 'text': f"{logradouro}, {num}, {cidade}, SP", 'layers': 'address'}
+            resp = requests.get(url, params=params_b).json()
+
+        # Tentativa C: Apenas o CEP (Último recurso, cai no meio da rua)
+        if not resp.get('features'):
+            params_c = {**common_params, 'text': f"{cep}, Brasil"}
+            resp = requests.get(url, params=params_c).json()
+
         if resp.get('features'):
             coords = resp['features'][0]['geometry']['coordinates']
             return {
                 "lat": coords[1], "lon": coords[0], 
-                "endereco": f"{v_res.get('logradouro')}, {num} - {v_res.get('bairro')}", 
-                "cidade": v_res.get('localidade')
+                "endereco": f"{logradouro}, {num} - {bairro}", 
+                "cidade": cidade
             }
         return None
-    except: return None
+    except Exception as e:
+        return None
 
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
