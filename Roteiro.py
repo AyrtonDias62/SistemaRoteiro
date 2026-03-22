@@ -9,19 +9,14 @@ import urllib.parse
 import os
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.6", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.7", layout="wide", page_icon="🧪")
 
-# CSS Ajustado: Mantém a Sidebar compacta, mas dá espaço ao conteúdo principal (Main)
+# CSS para ajuste de topo e compactação da Sidebar
 st.markdown("""
     <style>
-        /* Compacta a Sidebar */
         [data-testid="stSidebarNav"] {display: none;}
         section[data-testid="stSidebar"] .block-container {padding-top: 1.5rem !important;}
-        
-        /* Protege o conteúdo principal para não cortar o topo */
-        .main .block-container {padding-top: 3rem !important;}
-        
-        /* Ajusta o espaçamento entre elementos */
+        .main .block-container {padding-top: 3.5rem !important;}
         [data-testid="stVerticalBlock"] {gap: 0.6rem;}
     </style>
 """, unsafe_allow_html=True)
@@ -37,9 +32,7 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         rua, bairro, cidade, uf = v_res.get('logradouro', ''), v_res.get('bairro', ''), v_res.get('localidade', ''), v_res.get('uf', '')
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
-            'api_key': _ors_key,
-            'text': f"{cep}, {cidade}, {uf}, Brasil",
-            'size': 1,
+            'api_key': _ors_key, 'text': f"{cep}, {cidade}, {uf}, Brasil", 'size': 1,
             'boundary.circle.lat': -23.6912, 'boundary.circle.lon': -46.5594, 'boundary.circle.radius': 50
         }
         resp = requests.get(url, params=params).json()
@@ -92,7 +85,7 @@ with st.sidebar:
         btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v166" in st.session_state: del st.session_state.res_v166
+            if "res_v167" in st.session_state: del st.session_state.res_v167
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -129,11 +122,11 @@ if btn_gerar and entradas:
                 lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
                 tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
-        st.session_state.res_v166 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v167 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v166" in st.session_state:
-    d = st.session_state.res_v166
+if "res_v167" in st.session_state:
+    d = st.session_state.res_v167
     st.header(f"📊 Resumo: {d['k']} km | {d['m']} min")
     
     c1, c2 = st.columns([1.1, 1])
@@ -145,5 +138,12 @@ if "res_v166" in st.session_state:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
         if d['l']: folium.PolyLine(d['l'], color="red", weight=5).add_to(m)
         for p in d['t']:
-            folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b>", icon=folium.Icon(color="green" if "Matriz" in p['Local'] else "blue")).add_to(m)
+            # POP-UP RESTAURADO: Ordem em negrito como primeiro valor
+            texto_popup = f"<b>{p['Ordem']}</b><br>{p['Local']}"
+            folium.Marker(
+                [p['lat'], p['lon']], 
+                popup=folium.Popup(texto_popup, max_width=300), 
+                tooltip=p['Ordem'], # Aparece ao passar o mouse
+                icon=folium.Icon(color="green" if p['Ordem'] in ["SAÍDA", "RETORNO"] else "blue")
+            ).add_to(m)
         st_folium(m, use_container_width=True, height=480)
