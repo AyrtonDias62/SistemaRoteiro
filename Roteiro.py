@@ -39,11 +39,9 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
             'boundary.circle.lat': -23.6912,  # Latitude da Matriz SBC
             'boundary.circle.lon': -46.5594,  # Longitude da Matriz SBC
             'boundary.circle.radius': 50,     # Raio de 50km (Cobre todo ABCD/SP)
-            'layers': 'address',  # Foca em endereços reais
-            'sources': 'openstreetmap,openaddresses' # Fontes mais precisas para números
-        }
+            'layers': 'address'  # Foca em endereços reais
+         }
 
-        response = requests.get(url, params=params)
         response = requests.get(url, params=params).json()
         
         if response and len(response['features']) > 0:
@@ -51,7 +49,7 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
             return {
                 "lat": coords[1], 
                 "lon": coords[0], 
-                "endereco": f"{logradouro}, {numero} - {cidade}", 
+                "endereco": f"{logradouro}, {numero} - {bairro} - {cidade}", 
                 "cep": clean_cep
             }
                
@@ -131,14 +129,11 @@ with st.sidebar:
     btn = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
     
     # Botão de Limpar logo abaixo
-    if st.button("🗑️ LIMPAR CAMPOS", use_container_width=True):
-        # Remove todas as chaves de entrada e o resultado do roteiro do estado da sessão
+    if st.button("🗑️ LIMPAR TUDO", use_container_width=True):
         for key in list(st.session_state.keys()):
             if "input_" in key or "v143" in key:
-                st.session_state[key] = "" # Limpa o valor visualmente
-                del st.session_state[key]  # Remove a variável        
-        st.rerun() # Recarrega a página do zero
-
+                del st.session_state[key] # Apenas deleta, não atribui valor
+        st.rerun()
     st.divider()
 
 # --- 5. EXECUÇÃO ---
