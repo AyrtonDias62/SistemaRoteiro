@@ -7,7 +7,7 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V15.4", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V15.5", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÃO DE COORDENADAS (VERSÃO COM CERCA GEOGRÁFICA RÍGIDA) ---
 @st.cache_data(show_spinner=False)
@@ -25,8 +25,10 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
         bairro = r.get('bairro', '')
         # Se não tiver rua (CEP geral), busca pela cidade
         # AGORA INCLUÍMOS O NÚMERO NA BUSCA TEXTUAL
-        texto_busca = f"{logradouro}, {numero}, {bairro}, {cidade}" if logradouro else f"{cidade}, SP"
-
+       # 2. BUSCA POR COORDENADA: Usamos o CEP como termo principal para evitar "Rua Coimbra"
+        # O motor de busca prioriza o código postal, que é exato para a Rua Columbia
+        texto_busca = f"{clean_cep}, {numero}, Brasil"
+        
         # 2. Chamada Direta via API (Ignora limitações da biblioteca Python)
         # Usamos o boundary.circle para travar no ABCD + Grande SP
         url = "https://api.openrouteservice.org/geocode/search"
@@ -42,8 +44,17 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
         }
 
         response = requests.get(url, params=params)
-        if response.status_code != 200: return None
+        response = requests.get(url, params=params).json()
         
+        if response and len(response['features']) > 0:
+            coords = response['features'][0]['geometry']['coordinates']
+            return {
+                "lat": coords[1], 
+                "lon": coords[0], 
+                "endereco": f"{logradouro}, {numero} - {cidade}", 
+                "cep": clean_cep
+            }
+               
         geo = response.json()
         
         if geo and len(geo['features']) > 0:
@@ -97,7 +108,7 @@ u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep
 # --- 4. INTERFACE (ATUALIZADA COM BOTÃO LIMPAR) ---
 # --- 4. INTERFACE (ORGANIZADA) ---
 with st.sidebar:
-    st.header("🚚 Sistema Tecnolab")
+    st.header("🚚 Roteirizador Tecnolab")
     modo = st.selectbox("Comportamento do Roteiro:", [
         "1. Roteiro Travado (Ordem do Input)", 
         "2. Roteiro Inteligente (Circular/Otimizado)"
@@ -124,7 +135,8 @@ with st.sidebar:
         # Remove todas as chaves de entrada e o resultado do roteiro do estado da sessão
         for key in list(st.session_state.keys()):
             if "input_" in key or "v143" in key:
-                del st.session_state[key]
+                st.session_state[key] = "" # Limpa o valor visualmente
+                del st.session_state[key]  # Remove a variável        
         st.rerun() # Recarrega a página do zero
 
     st.divider()
