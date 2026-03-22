@@ -7,7 +7,7 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V15.3", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V15.4", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÃO DE COORDENADAS (VERSÃO COM CERCA GEOGRÁFICA RÍGIDA) ---
 @st.cache_data(show_spinner=False)
@@ -22,9 +22,10 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
 
         logradouro = r.get('logradouro', '')
         cidade = r.get('localidade', '')
+        bairro = r.get('bairro', '')
         # Se não tiver rua (CEP geral), busca pela cidade
         # AGORA INCLUÍMOS O NÚMERO NA BUSCA TEXTUAL
-        texto_busca = f"{logradouro}, {numero}, {cidade}" if logradouro else f"{cidade}, SP"
+        texto_busca = f"{logradouro}, {numero}, {bairro}, {cidade}" if logradouro else f"{cidade}, SP"
 
         # 2. Chamada Direta via API (Ignora limitações da biblioteca Python)
         # Usamos o boundary.circle para travar no ABCD + Grande SP
@@ -36,7 +37,8 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
             'boundary.circle.lat': -23.6912,  # Latitude da Matriz SBC
             'boundary.circle.lon': -46.5594,  # Longitude da Matriz SBC
             'boundary.circle.radius': 50,     # Raio de 50km (Cobre todo ABCD/SP)
-            'layers': 'address,venue,street'  # Foca em endereços reais
+            'layers': 'address'  # Foca em endereços reais
+            'sources': 'openstreetmap,openaddresses' # Fontes mais precisas para números
         }
 
         response = requests.get(url, params=params)
@@ -45,13 +47,29 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
         geo = response.json()
         
         if geo and len(geo['features']) > 0:
-            coords = geo['features'][0]['geometry']['coordinates']
+            feat = geo['features'][0]
+            coords = feat['geometry']['coordinates']
+            
+            # Validação Extra: Se o nome retornado for MUITO diferente do esperado (ex: Columbia vs Coimbra)
+            # o OpenRouteService costuma retornar o nome encontrado em 'properties']['name']
+            nome_encontrado = feat['properties'].get('name', '').lower()
+            
+            # Se ele "viajou" para outra rua, tentamos uma busca apenas pelo CEP como último recurso
+            if logradouro.lower() not in nome_encontrado and "columbia" in logradouro.lower():
+                 params['text'] = f"{clean_cep}, Brasil"
+                 res_cep = requests.get(url, params=params).json()
+                 if res_cep['features']:
+                     coords = res_cep['features'][0]['geometry']['coordinates']
+            
             return {
                 "lat": coords[1], 
                 "lon": coords[0], 
-                "endereco": f"{logradouro}, {numero} - {cidade}", 
+                "endereco": f"{logradouro}, {numero} - {bairro} - {cidade}",
                 "cep": clean_cep
             }
+        return None
+    except:
+        return None
         
         # Fallback: Se não achou com a rua, tenta apenas o CEP bruto dentro do círculo
         params['text'] = f"{clean_cep}, Brasil"
