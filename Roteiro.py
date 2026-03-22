@@ -73,30 +73,40 @@ ors_client = client.Client(key=ORS_KEY)
 u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
 # --- 3. SIDEBAR (CORREÇÃO DO BOTÃO LIMPAR) ---
+# --- Na seção da Sidebar ---
 with st.sidebar:
     st.title("🚚 Gestão de Rotas")
     modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"])
     st.divider()
     
     inputs = []
+    # Usamos o range para criar os campos
     for i in range(5):
         c1, c2 = st.columns([2, 1])
+        # A chave (key) deve ser única. Se ela for deletada do session_state, o campo reseta.
         with c1: 
-            # O truque do 'value' vindo do state permite limpar visualmente
             ce = st.text_input(f"CEP {i+1}", key=f"z_cep_{i}")
         with c2: 
             nu = st.text_input(f"Nº", key=f"z_num_{i}")
-        if ce: inputs.append({"cep": ce, "num": nu})
+        
+        if ce: 
+            inputs.append({"cep": ce, "num": nu})
 
-    btn_gerar = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
+    st.divider()
     
-    # Lógica de Limpeza Total
-    if st.button("🗑️ LIMPAR TUDO", use_container_width=True):
-        for k in list(st.session_state.keys()):
-            # Deleta as chaves dos inputs e dos resultados
-            if k.startswith("z_") or k == "v155":
-                del st.session_state[k]
-        st.rerun()
+    col_gerar, col_limpar = st.columns(2)
+    
+    with col_gerar:
+        btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
+    
+    with col_limpar:
+        if st.button("🗑️ LIMPAR", use_container_width=True):
+            # 1. Limpa todas as chaves de input e de resultados
+            for key in list(st.session_state.keys()):
+                if key.startswith("z_") or "v15" in key:
+                    del st.session_state[key]
+            # 2. Força o reinício imediato para limpar a tela
+            st.rerun()
 
 # --- 4. LOGÍSTICA ---
 if btn_gerar and inputs:
