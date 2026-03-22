@@ -53,42 +53,6 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
                 "cep": clean_cep
             }
                
-        geo = response.json()
-        
-        if geo and len(geo['features']) > 0:
-            feat = geo['features'][0]
-            coords = feat['geometry']['coordinates']
-            
-            # Validação Extra: Se o nome retornado for MUITO diferente do esperado (ex: Columbia vs Coimbra)
-            # o OpenRouteService costuma retornar o nome encontrado em 'properties']['name']
-            nome_encontrado = feat['properties'].get('name', '').lower()
-            
-            # Se ele "viajou" para outra rua, tentamos uma busca apenas pelo CEP como último recurso
-            if logradouro.lower() not in nome_encontrado and "columbia" in logradouro.lower():
-                 params['text'] = f"{clean_cep}, Brasil"
-                 res_cep = requests.get(url, params=params).json()
-                 if res_cep['features']:
-                     coords = res_cep['features'][0]['geometry']['coordinates']
-            
-            return {
-                "lat": coords[1], 
-                "lon": coords[0], 
-                "endereco": f"{logradouro}, {numero} - {bairro} - {cidade}",
-                "cep": clean_cep
-            }
-          
-        # Fallback: Se não achou com a rua, tenta apenas o CEP bruto dentro do círculo
-        params['text'] = f"{clean_cep}, Brasil"
-        response_retry = requests.get(url, params=params)
-        geo_retry = response_retry.json()
-        
-        if geo_retry and len(geo_retry['features']) > 0:
-            coords = geo_retry['features'][0]['geometry']['coordinates']
-            return {
-                "lat": coords[1], "lon": coords[0], 
-                "endereco": f"CEP {clean_cep}, {cidade}", "cep": clean_cep
-            }
-
         return None
     except Exception as e:
         st.error(f"Erro ao processar CEP {cep}: {e}")
