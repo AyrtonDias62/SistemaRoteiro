@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 import urllib.parse
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Tecnolab Logística V16.2", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.3", layout="wide", page_icon="🧪")
 
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
@@ -17,48 +17,62 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         num = "".join(filter(str.isdigit, str(num_raw))).strip()
         if len(cep) != 8: return None
         
-        # 1. ViaCEP: Garante que o texto da tabela esteja sempre certo
+        # 1. ViaCEP: Sempre funciona para pegar o nome da rua
         v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/").json()
         if "erro" in v_res: return None
         
-        rua_oficial = v_res.get('logradouro', '')
+        rua = v_res.get('logradouro', '')
         bairro = v_res.get('bairro', '')
         cidade = v_res.get('localidade', '')
+        uf = v_res.get('uf', '')
 
-        # 2. Busca Geográfica (ORS): Focamos apenas no CEP para evitar erro de número não mapeado
+        # 2. Busca Geográfica (ORS) - TENTATIVA 1: CEP + Cidade (Mais estável)
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
             'api_key': _ors_key,
-            'text': f"{cep}, Brasil", # Busca por CEP é infalível e evita erro fonético Columbia/Coimbra
+            'text': f"{cep}, {cidade}, {uf}, Brasil",
             'size': 1,
             'boundary.circle.lat': -23.6912,
             'boundary.circle.lon': -46.5594,
-            'boundary.circle.radius': 40
+            'boundary.circle.radius': 50
         }
+        
         resp = requests.get(url, params=params).json()
 
+        # TENTATIVA 2: Se falhar, busca pelo Nome da Rua + Cidade (Fallback)
+        if not resp.get('features'):
+            params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
+            resp = requests.get(url, params=params).json()
+
         if resp.get('features'):
+            # Validação Anti-Coimbra: Se o GPS retornar algo muito diferente do ViaCEP
+            feat = resp['features'][0]
+            label_mapa = feat['properties'].get('label', '').lower()
+            
+            # Se a rua for Columbia e o mapa insistir em Coimbra, tentamos forçar a coordenada da cidade
+            if "coimbra" in label_mapa and "columbia" in rua.lower():
+                # Forçamos uma busca mais genérica para tentar "desviciar" o mapa
+                params['text'] = f"{cep}, Brasil"
+                resp = requests.get(url, params=params).json()
+            
             coords = resp['features'][0]['geometry']['coordinates']
             return {
                 "lat": coords[1], "lon": coords[0], 
-                "endereco": f"{rua_oficial}, {num} - {bairro}", 
+                "endereco": f"{rua}, {num} - {bairro}", 
                 "cidade": cidade
             }
+        
         return None
     except: return None
 
 # --- 2. SETUP ---
-try:
-    ORS_KEY = st.secrets["ORS_KEY"]
-    ors_client = client.Client(key=ORS_KEY)
-except:
-    st.error("Erro na ORS_KEY."); st.stop()
-
+ORS_KEY = st.secrets["ORS_KEY"]
+ors_client = client.Client(key=ORS_KEY)
 u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
-# --- 3. SIDEBAR (CONTROLE DE RESET) ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
-    st.title("🚚 Roteirizador")
+    st.title("🚚 Roteirizador V16.3")
     if 'reset_id' not in st.session_state: st.session_state.reset_id = 0
 
     modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"], key=f"m_{st.session_state.reset_id}")
@@ -68,7 +82,7 @@ with st.sidebar:
     for i in range(5):
         c1, c2 = st.columns([2, 1])
         with c1: ce = st.text_input(f"CEP {i+1}", key=f"c_{i}_{st.session_state.reset_id}")
-        with c2: nu = st.text_input(f"Nº", key=f"n_{i}_{st.session_state.reset_id}")
+        with c2: nu = st.text_input(f"Nº {i+1}", key=f"n_{i}_{st.session_state.reset_id}")
         if ce: entradas.append({"cep": ce, "num": nu})
 
     st.divider()
@@ -76,7 +90,7 @@ with st.sidebar:
     with col_g: btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v162" in st.session_state: del st.session_state.res_v162
+            if "res_v163" in st.session_state: del st.session_state.res_v163
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -86,7 +100,7 @@ if btn_gerar and entradas:
     for item in entradas:
         res = get_coords_cep(item['cep'], item['num'], ORS_KEY)
         if res: pts_gps.append(res)
-        else: st.error(f"CEP {item['cep']} não encontrado.")
+        else: st.error(f"⚠️ O Mapa não conseguiu localizar o CEP {item['cep']}. Verifique se o CEP está correto ou tente um CEP próximo.")
 
     if pts_gps:
         if "Otimizar" in modo:
@@ -104,20 +118,23 @@ if btn_gerar and entradas:
 
         for i in range(len(rota_f) - 1):
             A, B = rota_f[i], rota_f[i+1]
-            dr = ors_client.directions(coordinates=[[A['lon'], A['lat']], [B['lon'], B['lat']]], profile='driving-car', format='geojson')
-            s = dr['features'][0]['properties']['summary']
-            d_k, d_m = round(s['distance']/1000, 2), round(s['duration']/60)
-            km += d_k; t_min += d_m
-            lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
-            lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
-            tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
+            try:
+                dr = ors_client.directions(coordinates=[[A['lon'], A['lat']], [B['lon'], B['lat']]], profile='driving-car', format='geojson')
+                s = dr['features'][0]['properties']['summary']
+                d_k, d_m = round(s['distance']/1000, 2), round(s['duration']/60)
+                km += d_k; t_min += d_m
+                lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
+                lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
+                tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
+            except:
+                st.warning(f"Não foi possível calcular a rota exata para {B['endereco']}.")
 
-        st.session_state.res_v162 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v163 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v162" in st.session_state:
-    d = st.session_state.res_v162
-    st.header(f"📊 {d['k']} km | {d['m']} min")
+if "res_v163" in st.session_state:
+    d = st.session_state.res_v163
+    st.header(f"📊 {d['k']} km | ~{d['m']} min")
     c1, c2 = st.columns([1.1, 1])
     with c1:
         st.dataframe(pd.DataFrame(d['t']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
@@ -125,7 +142,7 @@ if "res_v162" in st.session_state:
         st.link_button("🟢 WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
     with c2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=13)
-        folium.PolyLine(d['l'], color="red", weight=5).add_to(m)
+        if d['l']: folium.PolyLine(d['l'], color="red", weight=5).add_to(m)
         for p in d['t']:
             folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b><br>{p['Local']}", icon=folium.Icon(color="green" if "Matriz" in p['Local'] else "blue")).add_to(m)
         st_folium(m, use_container_width=True, height=500)
