@@ -6,9 +6,11 @@ from openrouteservice import client
 import folium
 from streamlit_folium import st_folium
 import urllib.parse
+from PIL import Image
+import os
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Tecnolab Logística V16.3", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.4", layout="wide", page_icon="🧪")
 
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
@@ -17,16 +19,11 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         num = "".join(filter(str.isdigit, str(num_raw))).strip()
         if len(cep) != 8: return None
         
-        # 1. ViaCEP: Sempre funciona para pegar o nome da rua
         v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/").json()
         if "erro" in v_res: return None
         
-        rua = v_res.get('logradouro', '')
-        bairro = v_res.get('bairro', '')
-        cidade = v_res.get('localidade', '')
-        uf = v_res.get('uf', '')
+        rua, bairro, cidade, uf = v_res.get('logradouro', ''), v_res.get('bairro', ''), v_res.get('localidade', ''), v_res.get('uf', '')
 
-        # 2. Busca Geográfica (ORS) - TENTATIVA 1: CEP + Cidade (Mais estável)
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
             'api_key': _ors_key,
@@ -39,19 +36,14 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         
         resp = requests.get(url, params=params).json()
 
-        # TENTATIVA 2: Se falhar, busca pelo Nome da Rua + Cidade (Fallback)
         if not resp.get('features'):
             params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
             resp = requests.get(url, params=params).json()
 
         if resp.get('features'):
-            # Validação Anti-Coimbra: Se o GPS retornar algo muito diferente do ViaCEP
             feat = resp['features'][0]
             label_mapa = feat['properties'].get('label', '').lower()
-            
-            # Se a rua for Columbia e o mapa insistir em Coimbra, tentamos forçar a coordenada da cidade
             if "coimbra" in label_mapa and "columbia" in rua.lower():
-                # Forçamos uma busca mais genérica para tentar "desviciar" o mapa
                 params['text'] = f"{cep}, Brasil"
                 resp = requests.get(url, params=params).json()
             
@@ -61,7 +53,6 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
                 "endereco": f"{rua}, {num} - {bairro}", 
                 "cidade": cidade
             }
-        
         return None
     except: return None
 
@@ -70,9 +61,21 @@ ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
 u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
-# --- 3. SIDEBAR ---
+# --- 3. SIDEBAR COM IMAGEM TECNOLAB ---
 with st.sidebar:
-    st.title("🚚 Roteirizador V16.3")
+    # Carregamento da Imagem Customizada
+    try:
+        img_path = "furgao_tecnolab.png"
+        if os.path.exists(img_path):
+            # Exibe a imagem centralizada na sidebar
+            st.image(img_path, use_container_width=True)
+        else:
+            st.warning("Imagem 'furgao_tecnolab.png' não encontrada.")
+    except Exception as e:
+        st.error(f"Erro ao carregar imagem: {e}")
+
+    st.title("Gestão de Rotas")
+    
     if 'reset_id' not in st.session_state: st.session_state.reset_id = 0
 
     modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"], key=f"m_{st.session_state.reset_id}")
@@ -90,7 +93,7 @@ with st.sidebar:
     with col_g: btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v163" in st.session_state: del st.session_state.res_v163
+            if "res_v164" in st.session_state: del st.session_state.res_v164
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -100,7 +103,7 @@ if btn_gerar and entradas:
     for item in entradas:
         res = get_coords_cep(item['cep'], item['num'], ORS_KEY)
         if res: pts_gps.append(res)
-        else: st.error(f"⚠️ O Mapa não conseguiu localizar o CEP {item['cep']}. Verifique se o CEP está correto ou tente um CEP próximo.")
+        else: st.error(f"⚠️ O Mapa não localizou o CEP {item['cep']}.")
 
     if pts_gps:
         if "Otimizar" in modo:
@@ -126,14 +129,13 @@ if btn_gerar and entradas:
                 lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
                 lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
                 tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
-            except:
-                st.warning(f"Não foi possível calcular a rota exata para {B['endereco']}.")
+            except: pass
 
-        st.session_state.res_v163 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v164 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v163" in st.session_state:
-    d = st.session_state.res_v163
+if "res_v164" in st.session_state:
+    d = st.session_state.res_v164
     st.header(f"📊 {d['k']} km | ~{d['m']} min")
     c1, c2 = st.columns([1.1, 1])
     with c1:
