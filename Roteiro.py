@@ -67,10 +67,7 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
                 "endereco": f"{logradouro}, {numero} - {bairro} - {cidade}",
                 "cep": clean_cep
             }
-        return None
-    except:
-        return None
-        
+          
         # Fallback: Se não achou com a rua, tenta apenas o CEP bruto dentro do círculo
         params['text'] = f"{clean_cep}, Brasil"
         response_retry = requests.get(url, params=params)
