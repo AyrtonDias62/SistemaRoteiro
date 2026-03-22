@@ -7,7 +7,7 @@ import folium
 from streamlit_folium import st_folium
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V15.2", layout="wide", page_icon="🚚")
+st.set_page_config(page_title="Roteirizador Tecnolab V15.3", layout="wide", page_icon="🚚")
 
 # --- 2. FUNÇÃO DE COORDENADAS (VERSÃO COM CERCA GEOGRÁFICA RÍGIDA) ---
 @st.cache_data(show_spinner=False)
@@ -79,12 +79,42 @@ except:
 u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep": "Matriz"}
 
 # --- 4. INTERFACE (COM NÚMERO) ---
+# --- 4. INTERFACE (ATUALIZADA COM BOTÃO LIMPAR) ---
 with st.sidebar:
-    st.header("🚚 Roteirizador Tecnolab")
+    st.header("🚚 Sistema Tecnolab")
     modo = st.selectbox("Comportamento do Roteiro:", [
-        "1. Roteiro Ordenado (Ordem do Input)", 
+        "1. Roteiro Travado (Ordem do Input)", 
         "2. Roteiro Inteligente (Circular/Otimizado)"
     ])
+    st.divider()
+    
+    dados_input = []
+    for i in range(5):
+        col_cep, col_num = st.columns([2, 1])
+        with col_cep:
+            # Usamos chaves dinâmicas para o reset funcionar
+            c = st.text_input(f"CEP {i+1}", key=f"cep_input_{i}")
+        with col_num:
+            n = st.text_input(f"Nº", key=f"num_input_{i}")
+        
+        if c: 
+            dados_input.append({"cep": c, "numero": n})
+            
+    # Colunas para os botões ficarem alinhados
+    col_btn1, col_btn2 = st.columns(2)
+    
+    with col_btn1:
+        btn = st.button("🚀 GERAR", use_container_width=True, type="primary")
+    
+    with col_btn2:
+        # Botão de Limpar
+        if st.button("🗑️ LIMPAR", use_container_width=True):
+            # Limpa todas as chaves de input do session_state
+            for key in st.session_state.keys():
+                if "input_" in key or "v143" in key:
+                    del st.session_state[key]
+            st.rerun() # Reinicia o app com os campos vazios
+
     st.divider()
     
     dados_input = []
