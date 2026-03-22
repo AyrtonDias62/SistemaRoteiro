@@ -5,42 +5,44 @@ import openrouteservice
 from openrouteservice import client
 import folium
 from streamlit_folium import st_folium
+import urllib.parse
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Roteirizador Tecnolab V15.5", layout="wide", page_icon="🚚")
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Roteirizador Tecnolab V15.0", layout="wide", page_icon="🚚")
 
-# --- 2. FUNÇÃO DE COORDENADAS (VERSÃO COM CERCA GEOGRÁFICA RÍGIDA) ---
+# --- 2. FUNÇÃO DE BUSCA (PRECISÃO POR CEP) ---
 @st.cache_data(show_spinner=False)
-def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
+def get_coords_cep(cep, numero, _ors_key):
+    """
+    Busca coordenadas usando ViaCEP para o nome e ORS para GPS.
+    Prioriza o CEP no texto de busca para evitar erros fonéticos (ex: Columbia vs Coimbra).
+    """
     try:
-        # 1. Limpeza e Consulta ViaCEP
+        # Limpeza do CEP
         clean_cep = str(cep).replace('-', '').replace(' ', '').strip()
         if len(clean_cep) != 8: return None
         
+        # Consulta ViaCEP (Fonte para o nome da rua)
         r = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/").json()
         if "erro" in r: return None
-
+        
         logradouro = r.get('logradouro', '')
         cidade = r.get('localidade', '')
         bairro = r.get('bairro', '')
-        # Se não tiver rua (CEP geral), busca pela cidade
-        # AGORA INCLUÍMOS O NÚMERO NA BUSCA TEXTUAL
-       # 2. BUSCA POR COORDENADA: Usamos o CEP como termo principal para evitar "Rua Coimbra"
-        # O motor de busca prioriza o código postal, que é exato para a Rua Columbia
+
+        # BUSCA TÉCNICA: CEP como primeiro termo evita confusão fonética de nomes de ruas
         texto_busca = f"{clean_cep}, {numero}, Brasil"
-        
-        # 2. Chamada Direta via API (Ignora limitações da biblioteca Python)
-        # Usamos o boundary.circle para travar no ABCD + Grande SP
+
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
-            'api_key': st.secrets["ORS_KEY"],
+            'api_key': _ors_key,
             'text': texto_busca,
             'size': 1,
-            'boundary.circle.lat': -23.6912,  # Latitude da Matriz SBC
-            'boundary.circle.lon': -46.5594,  # Longitude da Matriz SBC
-            'boundary.circle.radius': 50,     # Raio de 50km (Cobre todo ABCD/SP)
-            'layers': 'address'  # Foca em endereços reais
-         }
+            'boundary.circle.lat': -23.6912, # Centro em SBC
+            'boundary.circle.lon': -46.5594,
+            'boundary.circle.radius': 40,    # Raio de 40km (Grande SP/ABCD)
+            'layers': 'address'              # Foca em números de porta
+        }
 
         response = requests.get(url, params=params).json()
         
@@ -49,39 +51,40 @@ def get_coords_cep(cep,numero, _ors_client): # Adicionado parâmetro numero
             return {
                 "lat": coords[1], 
                 "lon": coords[0], 
-                "endereco": f"{logradouro}, {numero} - {bairro} - {cidade}", 
+                "endereco": f"{logradouro}, {numero} - {bairro}", 
                 "cep": clean_cep
             }
-               
         return None
-    except Exception as e:
-        st.error(f"Erro ao processar CEP {cep}: {e}")
+    except:
         return None
 
 # --- 3. SETUP API ---
 try:
-    ors_client = client.Client(key=st.secrets["ORS_KEY"])
+    ORS_KEY = st.secrets["ORS_KEY"]
+    ors_client = client.Client(key=ORS_KEY)
 except:
-    st.error("Erro na ORS_KEY."); st.stop()
+    st.error("Erro na ORS_KEY nos Secrets."); st.stop()
 
+# Coordenada da Unidade Matriz
 u_base = {"endereco": "Tecno Matriz SBC", "lat": -23.6912, "lon": -46.5594, "cep": "Matriz"}
 
-# --- 4. INTERFACE (COM NÚMERO) ---
-# --- 4. INTERFACE (ATUALIZADA COM BOTÃO LIMPAR) ---
-# --- 4. INTERFACE (ORGANIZADA) ---
+# --- 4. INTERFACE (SIDEBAR) ---
 with st.sidebar:
-    st.header("🚚 Roteirizador Tecnolab")
+    st.header("🚚 Sistema Tecnolab")
+    
     modo = st.selectbox("Comportamento do Roteiro:", [
         "1. Roteiro Travado (Ordem do Input)", 
-        "2. Roteiro Inteligente (Circular/Otimizado)"
+        "2. Roteiro Inteligente (Otimizado)"
     ])
+    
     st.divider()
     
+    # Lista para armazenar o que o usuário digitou
     dados_input = []
     for i in range(5):
         col_cep, col_num = st.columns([2, 1])
         with col_cep:
-            # Importante: o prefixo 'input_' ajuda o botão limpar a identificar o que apagar
+            # Usamos o prefixo 'input_' para facilitar a limpeza depois
             c = st.text_input(f"CEP {i+1}", key=f"input_cep_{i}")
         with col_num:
             n = st.text_input(f"Nº", key=f"input_num_{i}")
@@ -89,75 +92,53 @@ with st.sidebar:
         if c: 
             dados_input.append({"cep": c, "numero": n})
             
-    # Botão de Gerar
-    btn = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
+    # Botão de Execução
+    btn_gerar = st.button("🚀 GERAR ROTEIRO", use_container_width=True, type="primary")
     
-    # Botão de Limpar logo abaixo
+    # BOTÃO DE LIMPAR (Lógica de Reset Total)
     if st.button("🗑️ LIMPAR TUDO", use_container_width=True):
         for key in list(st.session_state.keys()):
-            if "input_" in key or "v143" in key:
-                del st.session_state[key] # Apenas deleta, não atribui valor
-        st.rerun()
-    st.divider()
+            if "input_" in key or "v150" in key:
+                del st.session_state[key]
+        st.rerun() # Força o app a recomeçar do zero
 
-# --- 5. EXECUÇÃO ---
-if btn and dados_input:
+# --- 5. EXECUÇÃO DA ROTA ---
+if btn_gerar and dados_input:
     pts_gps = []
     for item in dados_input:
-        # Passando CEP e Número para a função
-        res = get_coords_cep(item['cep'], item['numero'], ors_client)
+        res = get_coords_cep(item['cep'], item['numero'], ORS_KEY)
         if res: pts_gps.append(res)
     
     if not pts_gps:
-        st.error("Nenhum CEP encontrado."); st.stop()
+        st.error("Nenhum CEP válido encontrado."); st.stop()
 
     try:
-        pts_ordenados = []
-        
-        # --- LÓGICA MODO 2: INTELIGENTE (ORDENAÇÃO POR PROXIMIDADE) ---
+        # Ordenação
         if "Inteligente" in modo:
-            # Criamos uma lista de trabalho começando pela base
             lista_pendente = pts_gps.copy()
             ponto_atual = u_base
             pts_ordenados = []
             
-            # Algoritmo do "Vizinho Mais Próximo" (Garante o caminho circular)
             while lista_pendente:
-                proximo_ponto = None
-                menor_distancia = float('inf')
-                idx_proximo = 0
-                
-                # Comparamos o ponto atual com todos os que faltam visitar
                 coords_matriz = [[ponto_atual['lon'], ponto_atual['lat']]] + [[p['lon'], p['lat']] for p in lista_pendente]
                 matriz = ors_client.distance_matrix(locations=coords_matriz, profile='driving-car', metrics=['distance'])
-                
-                # Pegamos as distâncias do ponto atual (índice 0) para os outros
                 dists = matriz['distances'][0][1:]
                 
-                for i, d in enumerate(dists):
-                    if d < menor_distancia:
-                        menor_distancia = d
-                        proximo_ponto = lista_pendente[i]
-                        idx_proximo = i
-                
+                idx_proximo = dists.index(min(dists))
+                proximo_ponto = lista_pendente.pop(idx_proximo)
                 pts_ordenados.append(proximo_ponto)
                 ponto_atual = proximo_ponto
-                lista_pendente.pop(idx_proximo)
-        
-        # --- LÓGICA MODO 1: TRAVADO ---
         else:
             pts_ordenados = pts_gps
 
-        # --- CÁLCULO FINAL (IGUAL PARA AMBOS, MAS COM ORDENS DIFERENTES) ---
+        # Cálculo de Percurso (Trecho a Trecho)
         itinerario = []
         geometria = []
         dist_total = 0
         percurso_final = [u_base] + pts_ordenados + [u_base]
         
-        # Adiciona a Saída
         itinerario.append({"Seq": "Saída", "Destino": u_base['endereco'], "Dist": "0.0 km", "lat": u_base['lat'], "lon": u_base['lon']})
 
-        # Calcula trecho a trecho (Garante KMs reais e isolamento do retorno)
         for i in range(len(percurso_final) - 1):
             origem, destino = percurso_final[i], percurso_final[i+1]
             trecho = ors_client.directions(
@@ -171,84 +152,59 @@ if btn and dados_input:
             
             label = "Retorno" if i == len(percurso_final) - 2 else f"{i+1}º"
             itinerario.append({
-                "Seq": label, 
-                "Destino": destino['endereco'], 
-                "Dist": f"{d_km} km", 
+                "Seq": label, "Destino": destino['endereco'], "Dist": f"{d_km} km", 
                 "lat": destino['lat'], "lon": destino['lon']
             })
 
-        st.session_state.v143 = {"tabela": itinerario, "mapa": geometria, "total": round(dist_total, 2)}
+        # Salva o resultado na sessão
+        st.session_state.v150 = {"tabela": itinerario, "mapa": geometria, "total": round(dist_total, 2)}
 
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro no cálculo: {e}")
 
-# --- 6. EXIBIÇÃO (VERSÃO FINAL: SEM SOBREPOSIÇÃO + POP-UPS NUMERADOS) ---
-if "v143" in st.session_state:
-    r = st.session_state.v143
-    st.subheader(f"🏁 Total do Percurso: {r['total']} km")
+# --- 6. EXIBIÇÃO DOS RESULTADOS ---
+if "v150" in st.session_state:
+    res = st.session_state.v150
+    st.subheader(f"🏁 Percurso Total: {res['total']} km")
     
-    col1, col2 = st.columns([1, 1.2])
+    col_tab, col_map = st.columns([1, 1.2])
     
-    with col1:
-        df_exibicao = pd.DataFrame(r['tabela']).drop(columns=['lat', 'lon'])
-        st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
+    with col_tab:
+        # Tabela sem colunas técnicas
+        df_view = pd.DataFrame(res['tabela']).drop(columns=['lat', 'lon'])
+        st.dataframe(df_view, use_container_width=True, hide_index=True)
 
-        # --- WHATSAPP COM LINK DE PRECISÃO ---
-        import urllib.parse
+        # LINK WHATSAPP (Formato de Coordenadas para Precisão)
+        lista_coords = [f"{p['lat']},{p['lon']}" for p in res['tabela']]
+        link_google = f"https://www.google.com/maps/dir/?api=1&origin={lista_coords[0]}&destination={lista_coords[-1]}&waypoints={'|'.join(lista_coords[1:-1])}&travelmode=driving"
         
-        # Geramos o link de navegação forçando as coordenadas
-        # O parâmetro 'origin' e 'destination' com lat,lon evita que o Google busque nomes de empresas
-        lista_coords = [f"{p['lat']},{p['lon']}" for p in r['tabela']]
-        origem = lista_coords[0]
-        destino = lista_coords[-1]
-        waypoints = "|".join(lista_coords[1:-1])
-        
-        # Link que força o Google a não "reinterpretar" os nomes
-        link_google = f"https://www.google.com/maps/dir/?api=1&origin={origem}&destination={destino}&waypoints={waypoints}&travelmode=driving"
-
-        texto_wpp = f"🚚 *ROTEIRO TECNOLAB*\nTotal: {r['total']} km\n\n"
-        for p in r['tabela']:
+        msg_wpp = f"🚚 *ROTEIRO TECNOLAB*\nTotal: {res['total']} km\n\n"
+        for p in res['tabela']:
             icon = "🏢" if p['Seq'] in ['Saída', 'Retorno'] else "📍"
-            texto_wpp += f"{icon} *{p['Seq']}*: {p['Destino']}\n"
+            msg_wpp += f"{icon} *{p['Seq']}*: {p['Destino']}\n"
+        msg_wpp += f"\n🚀 *GPS:* {link_google}"
         
-        texto_wpp += f"\n🚀 *INICIAR NO GOOGLE MAPS:*\n{link_google}"
-        
-        link_final_wpp = f"https://api.whatsapp.com/send?text={urllib.parse.quote(texto_wpp)}"
-        st.divider()
-        st.link_button("🟢 ENVIAR PARA WHATSAPP", link_final_wpp, use_container_width=True, type="primary")
+        st.link_button("🟢 ENVIAR WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg_wpp)}", use_container_width=True)
 
-    with col2:
+    with col_map:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
-        cor_linha = "red" if "Inteligente" in modo else "blue"
-        folium.PolyLine(r['mapa'], color=cor_linha, weight=5, opacity=0.8).add_to(m)
+        folium.PolyLine(res['mapa'], color="blue", weight=5, opacity=0.7).add_to(m)
         
-        # Dicionário para rastrear coordenadas já usadas e evitar sobreposição
-        coords_usadas = {}
-
-        for p in r['tabela']:
+        # Marcadores com proteção contra sobreposição
+        coords_memo = {}
+        for p in res['tabela']:
             lat, lon = p['lat'], p['lon']
-            
-            # Lógica para evitar que um marcador suma embaixo do outro (mesma rua/número)
-            pos_chave = (round(lat, 5), round(lon, 5))
-            if pos_chave in coords_usadas:
-                coords_usadas[pos_chave] += 1
-                # Desloca levemente o marcador (0.0001 aprox 10 metros)
-                lat += 0.0001 * coords_usadas[pos_chave]
-                lon += 0.0001 * coords_usadas[pos_chave]
-            else:
-                coords_usadas[pos_chave] = 0
+            chave = (round(lat, 4), round(lon, 4))
+            if chave in coords_memo:
+                lat += 0.0001; lon += 0.0001 # Pequeno desvio visual
+            coords_memo[chave] = True
 
             is_base = p['Seq'] in ['Saída', 'Retorno']
-            
-            # Pop-up formatado com a Ordem e o Endereço
-            conteudo_popup = f"<b>{p['Seq']}</b><br>{p['Destino']}"
-            
             folium.Marker(
-                [lat, lon], 
-                popup=folium.Popup(conteudo_popup, max_width=300),
-                tooltip=f"{p['Seq']} - Clique para detalhes",
-                icon=folium.Icon(color='green' if is_base else 'blue', 
-                                 icon='play' if p['Seq'] == 'Saída' else 'info-sign')
+                [lat, lon],
+                popup=f"<b>{p['Seq']}</b><br>{p['Destino']}",
+                tooltip=p['Seq'],
+                icon=folium.Icon(color='green' if is_base else 'blue', icon='info-sign')
             ).add_to(m)
         
         st_folium(m, use_container_width=True, height=500)
