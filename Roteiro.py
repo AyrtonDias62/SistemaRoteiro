@@ -6,11 +6,19 @@ from openrouteservice import client
 import folium
 from streamlit_folium import st_folium
 import urllib.parse
-from PIL import Image
 import os
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Tecnolab Logística V16.4", layout="wide", page_icon="🧪")
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Tecnolab Logística V16.5", layout="wide", page_icon="🧪")
+
+# CSS para compactar a Sidebar (diminuir espaços vazios no topo e entre campos)
+st.markdown("""
+    <style>
+        [data-testid="stSidebarNav"] {display: none;}
+        .block-container {padding-top: 1rem;}
+        [data-testid="stVerticalBlock"] {gap: 0.5rem;}
+    </style>
+""", unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
@@ -18,41 +26,27 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         cep = "".join(filter(str.isdigit, str(cep_raw))).strip()
         num = "".join(filter(str.isdigit, str(num_raw))).strip()
         if len(cep) != 8: return None
-        
         v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/").json()
         if "erro" in v_res: return None
-        
         rua, bairro, cidade, uf = v_res.get('logradouro', ''), v_res.get('bairro', ''), v_res.get('localidade', ''), v_res.get('uf', '')
-
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
             'api_key': _ors_key,
             'text': f"{cep}, {cidade}, {uf}, Brasil",
             'size': 1,
-            'boundary.circle.lat': -23.6912,
-            'boundary.circle.lon': -46.5594,
-            'boundary.circle.radius': 50
+            'boundary.circle.lat': -23.6912, 'boundary.circle.lon': -46.5594, 'boundary.circle.radius': 50
         }
-        
         resp = requests.get(url, params=params).json()
-
         if not resp.get('features'):
             params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
             resp = requests.get(url, params=params).json()
-
         if resp.get('features'):
             feat = resp['features'][0]
-            label_mapa = feat['properties'].get('label', '').lower()
-            if "coimbra" in label_mapa and "columbia" in rua.lower():
+            if "coimbra" in feat['properties'].get('label', '').lower() and "columbia" in rua.lower():
                 params['text'] = f"{cep}, Brasil"
                 resp = requests.get(url, params=params).json()
-            
             coords = resp['features'][0]['geometry']['coordinates']
-            return {
-                "lat": coords[1], "lon": coords[0], 
-                "endereco": f"{rua}, {num} - {bairro}", 
-                "cidade": cidade
-            }
+            return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro}", "cidade": cidade}
         return None
     except: return None
 
@@ -61,39 +55,42 @@ ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
 u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
-# --- 3. SIDEBAR COM IMAGEM TECNOLAB ---
+# --- 3. SIDEBAR OTIMIZADA ---
 with st.sidebar:
-    # Carregamento da Imagem Customizada
-    try:
-        img_path = "furgao_tecnolab.png"
-        if os.path.exists(img_path):
-            # Exibe a imagem centralizada na sidebar
-            st.image(img_path, use_container_width=True)
-        else:
-            st.warning("Imagem 'furgao_tecnolab.png' não encontrada.")
-    except Exception as e:
-        st.error(f"Erro ao carregar imagem: {e}")
-
-    st.title("Gestão de Rotas")
+    # Imagem reduzida (width=150) e centralizada para economizar espaço vertical
+    img_path = "furgao_tecnolab.png"
+    if os.path.exists(img_path):
+        st.image(img_path, width=180) 
+    
+    st.subheader("Gestão de Rotas")
     
     if 'reset_id' not in st.session_state: st.session_state.reset_id = 0
 
-    modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"], key=f"m_{st.session_state.reset_id}")
+    # Radio em formato horizontal para ganhar espaço vertical
+    modo = st.radio("Método:", ["Ordem Digitada", "Otimizar Caminho"], 
+                    key=f"m_{st.session_state.reset_id}", horizontal=True)
+    
     st.divider()
     
     entradas = []
+    # Loop de 5 paradas com inputs mais baixos
     for i in range(5):
-        c1, c2 = st.columns([2, 1])
-        with c1: ce = st.text_input(f"CEP {i+1}", key=f"c_{i}_{st.session_state.reset_id}")
-        with c2: nu = st.text_input(f"Nº {i+1}", key=f"n_{i}_{st.session_state.reset_id}")
+        c1, c2 = st.columns([1.5, 0.8])
+        with c1:
+            ce = st.text_input(f"CEP {i+1}", key=f"c_{i}_{st.session_state.reset_id}", label_visibility="collapsed", placeholder=f"CEP {i+1}")
+        with c2:
+            nu = st.text_input(f"Nº", key=f"n_{i}_{st.session_state.reset_id}", label_visibility="collapsed", placeholder="Nº")
         if ce: entradas.append({"cep": ce, "num": nu})
 
     st.divider()
+    
+    # Botões lado a lado
     col_g, col_l = st.columns(2)
-    with col_g: btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
+    with col_g:
+        btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v164" in st.session_state: del st.session_state.res_v164
+            if "res_v165" in st.session_state: del st.session_state.res_v165
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -103,7 +100,7 @@ if btn_gerar and entradas:
     for item in entradas:
         res = get_coords_cep(item['cep'], item['num'], ORS_KEY)
         if res: pts_gps.append(res)
-        else: st.error(f"⚠️ O Mapa não localizou o CEP {item['cep']}.")
+        else: st.error(f"CEP {item['cep']} não encontrado.")
 
     if pts_gps:
         if "Otimizar" in modo:
@@ -130,21 +127,20 @@ if btn_gerar and entradas:
                 lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
                 tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
-
-        st.session_state.res_v164 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v165 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v164" in st.session_state:
-    d = st.session_state.res_v164
-    st.header(f"📊 {d['k']} km | ~{d['m']} min")
+if "res_v165" in st.session_state:
+    d = st.session_state.res_v165
+    st.header(f"📊 {d['k']} km | {d['m']} min")
     c1, c2 = st.columns([1.1, 1])
     with c1:
         st.dataframe(pd.DataFrame(d['t']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
         link = f"https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
         st.link_button("🟢 WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
     with c2:
-        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=13)
+        m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
         if d['l']: folium.PolyLine(d['l'], color="red", weight=5).add_to(m)
         for p in d['t']:
-            folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b><br>{p['Local']}", icon=folium.Icon(color="green" if "Matriz" in p['Local'] else "blue")).add_to(m)
-        st_folium(m, use_container_width=True, height=500)
+            folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b>", icon=folium.Icon(color="green" if "Matriz" in p['Local'] else "blue")).add_to(m)
+        st_folium(m, use_container_width=True, height=450)
