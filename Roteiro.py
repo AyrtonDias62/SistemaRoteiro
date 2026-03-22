@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 import urllib.parse
 
 # --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="Tecnolab V15.5", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab V15.6", layout="wide", page_icon="🧪")
 
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
