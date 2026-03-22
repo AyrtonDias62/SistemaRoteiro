@@ -52,7 +52,7 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
-u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
+u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6940335, "lon": -46.5544714}
 
 # --- 3. SIDEBAR ---
 with st.sidebar:
