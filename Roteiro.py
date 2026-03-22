@@ -13,46 +13,59 @@ st.set_page_config(page_title="Tecnolab V15.5", layout="wide", page_icon="🧪")
 @st.cache_data(show_spinner=False)
 def get_coords_cep(cep_raw, num_raw, _ors_key):
     try:
+        # Limpeza total de caracteres
         cep = "".join(filter(str.isdigit, str(cep_raw)))
         num = "".join(filter(str.isdigit, str(num_raw)))
         if len(cep) != 8: return None
         
-        # 1. ViaCEP para o texto correto da tabela
-        v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/").json()
+        # 1. Consulta ViaCEP (Fonte da Verdade para o Endereço)
+        v_res = requests.get(f"https://viacep.com.br/ws/{cep}/json/", timeout=5).json()
         if "erro" in v_res: return None
         
         logradouro = v_res.get('logradouro')
         bairro = v_res.get('bairro')
         cidade = v_res.get('localidade')
 
-        # 2. BUSCA GEOGRÁFICA (FOCO TOTAL NO CEP PARA NÃO CAIR NA RUA COIMBRA)
-        # Usamos o endpoint de geocode estruturado para forçar o CEP
+        # 2. TENTATIVAS DE LOCALIZAÇÃO (GPS)
         url = "https://api.openrouteservice.org/geocode/search"
+        headers = {'Authorization': _ors_key}
+        
+        # Tentativa 1: CEP + Número (A mais precisa para evitar Rua Coimbra)
         params = {
             'api_key': _ors_key,
-            'text': f"{cep}, {num}, Brasil", # CEP primeiro para evitar erro fonético
+            'text': f"{cep}, {num}, Brasil",
             'size': 1,
             'layers': 'address',
             'boundary.circle.lat': -23.6912,
             'boundary.circle.lon': -46.5594,
-            'boundary.circle.radius': 40
+            'boundary.circle.radius': 50
         }
-        resp = requests.get(url, params=params).json()
         
-        # Se falhar pelo texto composto, tenta puramente o CEP
+        resp = requests.get(url, params=params).json()
+
+        # Tentativa 2: Nome da Rua + Número + Cidade (Se o CEP falhar no motor do mapa)
+        if not resp.get('features'):
+            params['text'] = f"{logradouro}, {num}, {cidade}, SP"
+            resp = requests.get(url, params=params).json()
+
+        # Tentativa 3: Apenas o CEP (Último recurso)
         if not resp.get('features'):
             params['text'] = f"{cep}, Brasil"
+            params.pop('layers', None)
             resp = requests.get(url, params=params).json()
 
         if resp.get('features'):
-            coords = resp['features'][0]['geometry']['coordinates']
+            feat = resp['features'][0]
+            coords = feat['geometry']['coordinates']
             return {
                 "lat": coords[1], "lon": coords[0], 
                 "endereco": f"{logradouro}, {num} - {bairro}", 
                 "cidade": cidade
             }
         return None
-    except: return None
+    except Exception as e:
+        st.error(f"Erro técnico na busca: {e}")
+        return None
 
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
