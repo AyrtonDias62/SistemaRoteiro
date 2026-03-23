@@ -136,7 +136,7 @@ if btn_gerar and entradas:
                 km += d_k; t_min += d_m
                 lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
                 lbl = "Saída/Retorno" if i == len(rota_f)-2 else f"{i+1}ª Parada"
-                tab.append({"Ordem": lbl, "Local": B['endereco'], "Cidade": B.get('cidade',''), "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
+                tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
         st.session_state.res_v168 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
@@ -154,7 +154,7 @@ if "res_v168" in st.session_state:
         msg_intro = f"*Roteiro TECNOLAB - {d['k']} km | {d['m']} min*\n\n"
         msg_lista = ""
         for p in d['t']:
-            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']} - {p['Cidade']} ({p['Dist.']} | {p['Tempo']})\n"
+            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']} ({p['Dist.']} | {p['Tempo']})\n"
             
         link_maps = f"\n🗺️ *GPS:* https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
         msg_final = msg_intro + msg_lista + link_maps
