@@ -18,6 +18,15 @@ st.markdown("""
         section[data-testid="stSidebar"] .block-container {padding-top: 1.5rem !important;}
         .main .block-container {padding-top: 3.5rem !important;}
         [data-testid="stVerticalBlock"] {gap: 0.6rem;}
+
+       /* Estilo para o rótulo da coluna na sidebar */
+        .sidebar-label {
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-bottom: -10px;
+            color: #555;
+        } 
+        
     </style>
 """, unsafe_allow_html=True)
 
@@ -33,7 +42,7 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
             'api_key': _ors_key, 'text': f"{cep}, {cidade}, {uf}, Brasil", 'size': 1,
-            'boundary.circle.lat': -23.6912, 'boundary.circle.lon': -46.5594, 'boundary.circle.radius': 50
+            'boundary.circle.lat':  -23.691297, 'boundary.circle.lon':  -46.5590672, 'boundary.circle.radius': 50
         }
         resp = requests.get(url, params=params).json()
         if not resp.get('features'):
@@ -68,6 +77,13 @@ with st.sidebar:
                     key=f"m_{st.session_state.reset_id}", horizontal=True)
     
     st.divider()
+
+    # --- Títulos das Colunas (Novidade) ---
+    c_tit1, c_tit2 = st.columns([1.5, 0.8])
+    with c_tit1:
+        st.markdown('<p class="sidebar-label">CEP</p>', unsafe_allow_html=True)
+    with c_tit2:
+        st.markdown('<p class="sidebar-label">Nº</p>', unsafe_allow_html=True)
     
     entradas = []
     for i in range(5):
@@ -85,7 +101,7 @@ with st.sidebar:
         btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v168" in st.session_state: del st.session_state.res_v168
+            if "res_v169" in st.session_state: del st.session_state.res_v169
             st.session_state.reset_id += 1
             st.rerun()
 
