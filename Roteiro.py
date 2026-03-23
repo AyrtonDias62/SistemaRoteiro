@@ -52,8 +52,8 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
-u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.69293, "lon": -46.55627}
-
+u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6911764, "lon": -46.561668}     # CEP 09750-601 - Av. Índico 900
+                                                              # Na Lucas 907 -23.6908783   -46.5584661   09750-670
 # --- 3. SIDEBAR ---
 with st.sidebar:
     img_path = "furgao_tecnolab.png"
