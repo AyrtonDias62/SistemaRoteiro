@@ -19,7 +19,7 @@ def formatar_tempo(minutos_totais):
     return f"{horas}h {restante}min" if restante > 0 else f"{horas}h"
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.9", layout="wide", page_icon="📍")
+st.set_page_config(page_title="Tecnolab Logística V16.8", layout="wide", page_icon="📍")
 
 st.markdown("""
     <style>
@@ -40,7 +40,6 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         v_res = requests.get(f"https://viacep.com.br{cep}/json/").json()
         if "erro" in v_res: return None
         rua, bairro, cidade, uf = v_res.get('logradouro', ''), v_res.get('bairro', ''), v_res.get('localidade', ''), v_res.get('uf', '')
-        
         url = "https://api.openrouteservice.org"
         params = {
             'api_key': _ors_key, 'text': f"{cep}, {cidade}, {uf}, Brasil", 'size': 1,
@@ -51,11 +50,11 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
             params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
             resp = requests.get(url, params=params).json()
         
-        # CORREÇÃO: Acessando o primeiro item [0] da lista de features
-        if resp.get('features') and len(resp['features']) > 0:
+        # VOLTANDO PARA A ESTRUTURA ORIGINAL QUE FUNCIONAVA:
+        if resp.get('features'):
             feat = resp['features'][0]
             coords = feat['geometry']['coordinates']
-            # Cidade agregada ao endereço para não ocupar coluna extra
+            # coords[0] é lon, coords[1] é lat
             return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro} ({cidade})"}
         return None
     except: return None
