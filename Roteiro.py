@@ -143,7 +143,7 @@ if "res_v168" in st.session_state:
         link_maps = f"\n🗺️ *GPS:* https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
         msg_final = msg_intro + msg_lista + link_maps
         
-        st.link_button("🟢 ENVIAR ROTEIRO WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg_final)}", use_container_width=True)
+        st.link_button("🟢 Enviar Roteiro WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg_final)}", use_container_width=True)
         
     with c2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
