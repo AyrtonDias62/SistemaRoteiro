@@ -109,7 +109,7 @@ if btn_gerar and entradas:
 
         rota_f = [u_base] + ord_list + [u_base]
         tab, lin, km, t_min = [], [], 0, 0
-        tab.append({"Ordem": "SAÍDA", "Local": u_base['endereco'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
+        tab.append({"Ordem": "Saída/Retorno", "Local": u_base['endereco'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
 
         for i in range(len(rota_f) - 1):
             A, B = rota_f[i], rota_f[i+1]
@@ -154,6 +154,6 @@ if "res_v168" in st.session_state:
                 [p['lat'], p['lon']], 
                 popup=folium.Popup(texto_popup, max_width=300), 
                 tooltip=p['Ordem'],
-                icon=folium.Icon(color="green" if p['Ordem'] in ["SAÍDA", "RETORNO"] else "blue")
+                icon=folium.Icon(color="green" if p['Ordem'] in ["Saída/Retorno"] else "blue")
             ).add_to(m)
         st_folium(m, use_container_width=True, height=480)
