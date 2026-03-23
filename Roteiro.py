@@ -49,7 +49,9 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         if not resp.get('features'):
             params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
             resp = requests.get(url, params=params).json()
-        if resp.get('features'):
+        
+        # CORREÇÃO: Adicionado o índice [0] para acessar a primeira feature da lista
+        if resp.get('features') and len(resp['features']) > 0:
             feat = resp['features'][0]
             coords = feat['geometry']['coordinates']
             return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro} ({cidade})"}
@@ -142,4 +144,3 @@ if "res_v168" in st.session_state:
             folium.Marker([p['lat'], p['lon']], popup=f"<b>{p['Ordem']}</b><br>{p['Local']}", tooltip=p['Ordem'],
                           icon=folium.Icon(color="green" if p['Ordem'] == "Saída/Retorno" else "blue")).add_to(m)
         st_folium(m, use_container_width=True, height=480)
-
