@@ -9,7 +9,7 @@ import urllib.parse
 import os
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.8", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.8", layout="wide", page_icon="📍")
 
 # CSS para ajuste de topo e compactação da Sidebar
 st.markdown("""
@@ -69,7 +69,7 @@ with st.sidebar:
     if os.path.exists(img_path):
         st.image(img_path, width=180) 
     
-    st.subheader("Gestão de Rotas")
+    st.subheader("Gestão de Rotas Tecnolab")
     
     if 'reset_id' not in st.session_state: st.session_state.reset_id = 0
 
@@ -151,7 +151,7 @@ if "res_v168" in st.session_state:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
         
         # --- MONTAGEM DA MENSAGEM WHATSAPP ---
-        msg_intro = f"*ROTEIRO TECNOLAB - {d['k']} km*\n\n"
+        msg_intro = f"*Roteiro TECNOLAB - {d['k']} km*\n\n"
         msg_lista = ""
         for p in d['t']:
             msg_lista += f"📍 *{p['Ordem']}:* {p['Local']}\n"
