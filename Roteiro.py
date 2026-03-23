@@ -8,6 +8,15 @@ from streamlit_folium import st_folium
 import urllib.parse
 import os
 
+# --- FUNÇÃO PARA FORMATAR O TEMPO ---
+def formatar_tempo(minutos_totais):
+    if minutos_totais == "-" or minutos_totais is None: return "-"
+    minutos = int(minutos_totais)
+    if minutos < 60: return f"{minutos} min"
+    horas = minutos // 60
+    restante = minutos % 60
+    return f"{horas}h {restante}min" if restante > 0 else f"{horas}h"
+
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Tecnolab Logística V16.9", layout="wide", page_icon="📍")
 
@@ -54,15 +63,16 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
                 params['text'] = f"{cep}, Brasil"
                 resp = requests.get(url, params=params).json()
             coords = resp['features'][0]['geometry']['coordinates']
-            return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro}", "cidade": cidade}
+            # Incluindo a cidade no campo endereco
+            return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro} ({cidade})", "cidade": cidade}
         return None
     except: return None
 
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
-u_base = {"endereco": "Unidade Matriz", "lat": -23.691297, "lon": -46.5590672}     # CEP 09750-601 - Av. Índico 900
-                                                              # Na Lucas 907 -23.6908783   -46.5584661   09750-670
+u_base = {"endereco": "Unidade Matriz (SBC)", "lat": -23.691297, "lon": -46.5590672}     # CEP 09750-601 - Av. Índico 900
+
 # --- 3. SIDEBAR ---
 with st.sidebar:
     img_path = "furgao_tecnolab.png"
@@ -78,7 +88,6 @@ with st.sidebar:
     
     st.divider()
 
-    # --- Títulos das Colunas (Novidade) ---
     c_tit1, c_tit2 = st.columns([1.5, 0.8])
     with c_tit1:
         st.markdown('<p class="sidebar-label">CEP</p>', unsafe_allow_html=True)
@@ -101,7 +110,7 @@ with st.sidebar:
         btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v169" in st.session_state: del st.session_state.res_v169
+            if "res_v168" in st.session_state: del st.session_state.res_v168
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -136,14 +145,14 @@ if btn_gerar and entradas:
                 km += d_k; t_min += d_m
                 lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
                 lbl = "Saída/Retorno" if i == len(rota_f)-2 else f"{i+1}ª Parada"
-                tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
+                tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": formatar_tempo(d_m), "lat": B['lat'], "lon": B['lon']})
             except: pass
-        st.session_state.res_v168 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v168 = {"t": tab, "l": lin, "k": round(km, 2), "m": formatar_tempo(t_min)}
 
 # --- 5. EXIBIÇÃO ---
 if "res_v168" in st.session_state:
     d = st.session_state.res_v168
-    st.header(f"🗺️ Roteiro Total Km e Tempo estimados: {d['k']} km | {d['m']} min")
+    st.header(f"🗺️ Roteiro Total Estimado: {d['k']} km | {d['m']}")
     
     c1, c2 = st.columns([1.1, 1])
     with c1:
@@ -151,10 +160,11 @@ if "res_v168" in st.session_state:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
         
         # --- MONTAGEM DA MENSAGEM WHATSAPP ---
-        msg_intro = f"*Roteiro TECNOLAB - {d['k']} km | {d['m']} min*\n\n"
+        msg_intro = f"*Roteiro TECNOLAB - {d['k']} km | {d['m']}*\n\n"
         msg_lista = ""
         for p in d['t']:
-            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']} ({p['Dist.']} | {p['Tempo']})\n"
+            info_viagem = f" ({p['Dist.']} | {p['Tempo']})" if p['Dist.'] != "-" else ""
+            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']}{info_viagem}\n"
             
         link_maps = f"\n🗺️ *GPS:* https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
         msg_final = msg_intro + msg_lista + link_maps
