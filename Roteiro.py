@@ -143,7 +143,7 @@ if btn_gerar and entradas:
 # --- 5. EXIBIÇÃO ---
 if "res_v168" in st.session_state:
     d = st.session_state.res_v168
-    st.header(f"📊 Roteiro Total Km e Tempo estimados: {d['k']} km | {d['m']} min")
+    st.header(f"🗺️ Roteiro Total Km e Tempo estimados: {d['k']} km | {d['m']} min")
     
     c1, c2 = st.columns([1.1, 1])
     with c1:
