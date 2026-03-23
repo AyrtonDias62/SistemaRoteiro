@@ -23,7 +23,7 @@ st.markdown("""
         .sidebar-label {
             font-size: 0.85rem;
             font-weight: bold;
-            margin-bottom: -10px;
+            margin-bottom: -5px;
             color: #555;
         } 
         
