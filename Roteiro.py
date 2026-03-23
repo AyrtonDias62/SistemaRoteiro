@@ -125,7 +125,7 @@ if btn_gerar and entradas:
 
         rota_f = [u_base] + ord_list + [u_base]
         tab, lin, km, t_min = [], [], 0, 0
-        tab.append({"Ordem": "Saída/Retorno", "Local": u_base['endereco'], "Cidade": u_base['cidade'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
+        tab.append({"Ordem": "Saída/Retorno", "Local": u_base['endereco'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
 
         for i in range(len(rota_f) - 1):
             A, B = rota_f[i], rota_f[i+1]
