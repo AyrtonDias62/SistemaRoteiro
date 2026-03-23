@@ -19,7 +19,7 @@ def formatar_tempo(minutos_totais):
     return f"{horas}h {restante}min" if restante > 0 else f"{horas}h"
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.8", layout="wide", page_icon="📍")
+st.set_page_config(page_title="Tecnolab Logística V16.9", layout="wide", page_icon="📍")
 
 st.markdown("""
     <style>
