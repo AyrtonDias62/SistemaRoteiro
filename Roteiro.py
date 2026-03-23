@@ -61,7 +61,7 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
-u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.691297, "lon": -46.5590672}     # CEP 09750-601 - Av. Índico 900
+u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.691297, "lon": -46.5590672, "cidade": "SBC"}     # CEP 09750-601 - Av. Índico 900
                                                               # Na Lucas 907 -23.6908783   -46.5584661   09750-670
 # --- 3. SIDEBAR ---
 with st.sidebar:
@@ -155,7 +155,7 @@ if "res_v168" in st.session_state:
         msg_lista = ""
         for p in d['t']:
             msg_lista += f"📍 *{p['Ordem']}:* {p['Local']} - {p['Cidade']} ({p['Dist.']} | {p['Tempo']})\n"
-            
+        
         link_maps = f"\n🗺️ *GPS:* https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
         msg_final = msg_intro + msg_lista + link_maps
         
@@ -173,3 +173,4 @@ if "res_v168" in st.session_state:
                 icon=folium.Icon(color="green" if p['Ordem'] in ["Saída/Retorno"] else "blue")
             ).add_to(m)
         st_folium(m, use_container_width=True, height=480)
+
