@@ -8,12 +8,11 @@ from streamlit_folium import st_folium
 import urllib.parse
 import os
 
-# --- FUNÇÃO AUXILIAR DE FORMATAÇÃO DE TEMPO ---
+# --- FUNÇÃO DE FORMATAÇÃO DE TEMPO (NOVIDADE) ---
 def formatar_tempo(minutos_totais):
     if minutos_totais == "-" or minutos_totais is None: return "-"
     minutos = int(minutos_totais)
-    if minutos < 60:
-        return f"{minutos}min"
+    if minutos < 60: return f"{minutos} min"
     horas = minutos // 60
     restante = minutos % 60
     return f"{horas}h {restante}min" if restante > 0 else f"{horas}h"
@@ -50,11 +49,11 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
             params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
             resp = requests.get(url, params=params).json()
         
-        # VOLTANDO PARA A ESTRUTURA ORIGINAL QUE FUNCIONAVA:
+        # RESTAURADO O ACESSO ORIGINAL [0]
         if resp.get('features'):
             feat = resp['features'][0]
             coords = feat['geometry']['coordinates']
-            # coords[0] é lon, coords[1] é lat
+            # Cidade agregada conforme solicitado
             return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro} ({cidade})"}
         return None
     except: return None
