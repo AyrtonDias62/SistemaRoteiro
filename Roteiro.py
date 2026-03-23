@@ -9,7 +9,7 @@ import urllib.parse
 import os
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.8", layout="wide", page_icon="📍")
+st.set_page_config(page_title="Tecnolab Logística V16.9", layout="wide", page_icon="📍")
 
 # CSS para ajuste de topo e compactação da Sidebar
 st.markdown("""
@@ -125,7 +125,7 @@ if btn_gerar and entradas:
 
         rota_f = [u_base] + ord_list + [u_base]
         tab, lin, km, t_min = [], [], 0, 0
-        tab.append({"Ordem": "Saída/Retorno", "Local": u_base['endereco'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
+        tab.append({"Ordem": "Saída/Retorno", "Local": u_base['endereco'], "Cidade": u_base['cidade'], "Dist.": "-", "Tempo": "-", "lat": u_base['lat'], "lon": u_base['lon']})
 
         for i in range(len(rota_f) - 1):
             A, B = rota_f[i], rota_f[i+1]
@@ -136,7 +136,7 @@ if btn_gerar and entradas:
                 km += d_k; t_min += d_m
                 lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
                 lbl = "Saída/Retorno" if i == len(rota_f)-2 else f"{i+1}ª Parada"
-                tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
+                tab.append({"Ordem": lbl, "Local": B['endereco'], "Cidade": B.get('cidade',''), "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
         st.session_state.res_v168 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
@@ -154,8 +154,8 @@ if "res_v168" in st.session_state:
         msg_intro = f"*Roteiro TECNOLAB - {d['k']} km | {d['m']} min*\n\n"
         msg_lista = ""
         for p in d['t']:
-            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']}\n"
-        
+            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']} - {p['Cidade']} ({p['Dist.']} | {p['Tempo']})\n"
+            
         link_maps = f"\n🗺️ *GPS:* https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
         msg_final = msg_intro + msg_lista + link_maps
         
