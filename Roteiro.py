@@ -9,7 +9,7 @@ import urllib.parse
 import os
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Tecnolab Logística V16.7", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="Tecnolab Logística V16.8", layout="wide", page_icon="🧪")
 
 # CSS para ajuste de topo e compactação da Sidebar
 st.markdown("""
@@ -52,7 +52,7 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
 # --- 2. SETUP ---
 ORS_KEY = st.secrets["ORS_KEY"]
 ors_client = client.Client(key=ORS_KEY)
-u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.69293, "lon": -46.55627}
+u_base = {"endereco": "Unidade Matriz SBC", "lat": -23.6912, "lon": -46.5594}
 
 # --- 3. SIDEBAR ---
 with st.sidebar:
@@ -85,7 +85,7 @@ with st.sidebar:
         btn_gerar = st.button("🚀 GERAR", use_container_width=True, type="primary")
     with col_l:
         if st.button("🗑️ LIMPAR", use_container_width=True):
-            if "res_v167" in st.session_state: del st.session_state.res_v167
+            if "res_v168" in st.session_state: del st.session_state.res_v168
             st.session_state.reset_id += 1
             st.rerun()
 
@@ -122,28 +122,38 @@ if btn_gerar and entradas:
                 lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
                 tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
-        st.session_state.res_v167 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
+        st.session_state.res_v168 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
 
 # --- 5. EXIBIÇÃO ---
-if "res_v167" in st.session_state:
-    d = st.session_state.res_v167
-    st.header(f"📊 Resumo: {d['k']} km | {d['m']} min")
+if "res_v168" in st.session_state:
+    d = st.session_state.res_v168
+    st.header(f"📊 Roteiro Total Km e Tempo estimados: {d['k']} km | {d['m']} min")
     
     c1, c2 = st.columns([1.1, 1])
     with c1:
-        st.dataframe(pd.DataFrame(d['t']).drop(columns=['lat', 'lon']), use_container_width=True, hide_index=True)
-        link = f"https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
-        st.link_button("🟢 WHATSAPP / GPS", f"https://api.whatsapp.com/send?text={urllib.parse.quote(link)}", use_container_width=True)
+        df_display = pd.DataFrame(d['t']).drop(columns=['lat', 'lon'])
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        
+        # --- MONTAGEM DA MENSAGEM WHATSAPP ---
+        msg_intro = f"*ROTEIRO TECNOLAB - {d['k']} km*\n\n"
+        msg_lista = ""
+        for p in d['t']:
+            msg_lista += f"📍 *{p['Ordem']}:* {p['Local']}\n"
+        
+        link_maps = f"\n🗺️ *GPS:* https://www.google.com/maps/dir/{'/'.join([f'{p['lat']},{p['lon']}' for p in d['t']])}"
+        msg_final = msg_intro + msg_lista + link_maps
+        
+        st.link_button("🟢 ENVIAR ROTEIRO WHATSAPP", f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg_final)}", use_container_width=True)
+        
     with c2:
         m = folium.Map(location=[u_base['lat'], u_base['lon']], zoom_start=12)
         if d['l']: folium.PolyLine(d['l'], color="red", weight=5).add_to(m)
         for p in d['t']:
-            # POP-UP RESTAURADO: Ordem em negrito como primeiro valor
             texto_popup = f"<b>{p['Ordem']}</b><br>{p['Local']}"
             folium.Marker(
                 [p['lat'], p['lon']], 
                 popup=folium.Popup(texto_popup, max_width=300), 
-                tooltip=p['Ordem'], # Aparece ao passar o mouse
+                tooltip=p['Ordem'],
                 icon=folium.Icon(color="green" if p['Ordem'] in ["SAÍDA", "RETORNO"] else "blue")
             ).add_to(m)
         st_folium(m, use_container_width=True, height=480)
