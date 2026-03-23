@@ -10,7 +10,7 @@ import os
 
 # --- FUNÇÃO AUXILIAR DE FORMATAÇÃO DE TEMPO ---
 def formatar_tempo(minutos_totais):
-    if minutos_totais == "-": return "-"
+    if minutos_totais == "-" or minutos_totais is None: return "-"
     minutos = int(minutos_totais)
     if minutos < 60:
         return f"{minutos}min"
@@ -40,6 +40,7 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
         v_res = requests.get(f"https://viacep.com.br{cep}/json/").json()
         if "erro" in v_res: return None
         rua, bairro, cidade, uf = v_res.get('logradouro', ''), v_res.get('bairro', ''), v_res.get('localidade', ''), v_res.get('uf', '')
+        
         url = "https://api.openrouteservice.org"
         params = {
             'api_key': _ors_key, 'text': f"{cep}, {cidade}, {uf}, Brasil", 'size': 1,
@@ -50,10 +51,11 @@ def get_coords_cep(cep_raw, num_raw, _ors_key):
             params['text'] = f"{rua}, {cidade}, {uf}, Brasil"
             resp = requests.get(url, params=params).json()
         
-        # CORREÇÃO: Adicionado o índice [0] para acessar a primeira feature da lista
+        # CORREÇÃO: Acessando o primeiro item [0] da lista de features
         if resp.get('features') and len(resp['features']) > 0:
             feat = resp['features'][0]
             coords = feat['geometry']['coordinates']
+            # Cidade agregada ao endereço para não ocupar coluna extra
             return {"lat": coords[1], "lon": coords[0], "endereco": f"{rua}, {num} - {bairro} ({cidade})"}
         return None
     except: return None
