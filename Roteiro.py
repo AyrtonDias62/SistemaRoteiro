@@ -151,7 +151,7 @@ if "res_v168" in st.session_state:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
         
         # --- MONTAGEM DA MENSAGEM WHATSAPP ---
-        msg_intro = f"*Roteiro TECNOLAB - {d['k']} km*\n\n"
+        msg_intro = f"*Roteiro TECNOLAB - {d['k']} km | {d['m']} min*\n\n"
         msg_lista = ""
         for p in d['t']:
             msg_lista += f"📍 *{p['Ordem']}:* {p['Local']}\n"
