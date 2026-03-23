@@ -119,7 +119,7 @@ if btn_gerar and entradas:
                 d_k, d_m = round(s['distance']/1000, 2), round(s['duration']/60)
                 km += d_k; t_min += d_m
                 lin.extend([[c[1], c[0]] for c in dr['features'][0]['geometry']['coordinates']])
-                lbl = "RETORNO" if i == len(rota_f)-2 else f"{i+1}ª PARADA"
+                lbl = "Saída/Retorno" if i == len(rota_f)-2 else f"{i+1}ª Parada"
                 tab.append({"Ordem": lbl, "Local": B['endereco'], "Dist.": f"{d_k} km", "Tempo": f"{d_m} min", "lat": B['lat'], "lon": B['lon']})
             except: pass
         st.session_state.res_v168 = {"t": tab, "l": lin, "k": round(km, 2), "m": t_min}
